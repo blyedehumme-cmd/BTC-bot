@@ -17,9 +17,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TELEGRAM_TOKEN  = "7879789602:AAFK172eeD0QmshegCq49Jgrr6mmy_1ZfTE"
 CHAT_ID         = "1528945134"
 CB_API_KEY      = "organizations/b9bdbe0e-53e7-48e0-920e-3c921d7721bb/apiKeys/e9d7f71c-42f0-4244-9e9e-6b391b361918"
-CB_API_SECRET   = "TU_API_SECRET_AQUI"   # ← pega aquí tu secret de Coinbase
-MAX_RISK        = 0.10   # 10% máximo por operación
-MIN_CONFIDENCE  = 0.70   # 70% mínimo para entrar
+CB_API_SECRET   = "TU_API_SECRET_AQUI"   # ← pega aquí tu clave secreta de Coinbase
+MAX_RISK        = 0.10   # 10 % máximo por operación
+MIN_CONFIDENCE  = 0.70   # 70 % mínimo para entrar
 INTERVAL_MIN    = 5      # analizar cada 5 minutos
 PRODUCT         = "BTC-USDC"
 
@@ -469,3 +469,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
