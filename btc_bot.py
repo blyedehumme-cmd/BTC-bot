@@ -1,7 +1,4 @@
-from pathlib import Path
-import zipfile
-
-code = r'''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 BTC Bot Seguro Avanzado - Coinbase Advanced Trade + Telegram
 
@@ -642,24 +639,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
-
-requirements = """python-telegram-bot==20.7
-requests==2.31.0
-coinbase-advanced-py==1.8.2
-cryptography
-PyJWT
-"""
-
-Path("/mnt/data/btc_bot_restclient_completo.py").write_text(code)
-Path("/mnt/data/requirements_restclient.txt").write_text(requirements)
-
-zip_path = Path("/mnt/data/btc_bot_restclient_completo.zip")
-with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-    z.writestr("btc_bot.py", code)
-    z.writestr("requirements.txt", requirements)
-    z.writestr("runtime.txt", "python-3.11.9\n")
-
-print("/mnt/data/btc_bot_restclient_completo.py")
-print("/mnt/data/requirements_restclient.txt")
-print("/mnt/data/btc_bot_restclient_completo.zip")
