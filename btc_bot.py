@@ -727,6 +727,7 @@ def validate_config():
 
 def main():
     validate_config()
+    load_state()
     get_client()
 
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
