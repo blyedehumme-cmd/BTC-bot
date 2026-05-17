@@ -659,24 +659,24 @@ async def trading_loop(app: Application):
                     place_market_order("SELL", base_size=state.position_size_btc)
                     record_trade_pnl(price)
 
-      
-                    pnl = (price - state.entry_price) * state.position_size_btc
-win_rate = (
-    (state.stats.wins / state.stats.total_trades) * 100
-    if state.stats.total_trades > 0 else 0
-)
+                                        pnl = (price - state.entry_price) * state.position_size_btc
 
-await send_telegram(
-    app,
-    f"{'🟢' if pnl >= 0 else '🔴'} Trade {'ganado' if pnl >= 0 else 'perdido'}\n"
-    f"Resultado: ${pnl:.2f}\n"
-    f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
-    f"Win Rate: {win_rate:.2f}%\n"
-    f"Salida: {exit_reason}\n"
-    f"Precio salida: {price:.2f}\n"
-    f"Entrada: {state.entry_price:.2f}\n"
-    f"BTC: {state.position_size_btc:.8f}"
-)
+                    win_rate = (
+                        (state.stats.wins / state.stats.total_trades) * 100
+                        if state.stats.total_trades > 0 else 0
+                    )
+
+                    await send_telegram(
+                        app,
+                        f"{'🟢' if pnl >= 0 else '🔴'} Trade {'ganado' if pnl >= 0 else 'perdido'}\n"
+                        f"Resultado: ${pnl:.2f}\n"
+                        f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
+                        f"Win Rate: {win_rate:.2f}%\n"
+                        f"Salida: {exit_reason}\n"
+                        f"Precio salida: {price:.2f}\n"
+                        f"Entrada: {state.entry_price:.2f}\n"
+                        f"BTC: {state.position_size_btc:.8f}"
+                    )
 
                     state.position_open = False
                     state.entry_price = 0.0
