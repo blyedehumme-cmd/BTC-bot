@@ -279,6 +279,8 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pause_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state.active = False
+    save_state()
+    
     await update.message.reply_text("⏸ Bot pausado. No abrirá nuevas operaciones.")
 
 
