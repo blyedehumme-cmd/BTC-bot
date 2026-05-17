@@ -1,16 +1,21 @@
-#!/usr/bin/env python3
+from pathlib import Path
+import zipfile
+
+code = r'''#!/usr/bin/env python3
 """
-BTC Bot Seguro Avanzado - Coinbase Advanced Trade API + Telegram
+BTC Bot Seguro Avanzado - Coinbase Advanced Trade + Telegram
 
-Compatible con Coinbase CDP API Keys nuevas:
-CB_API_KEY = organizations/.../apiKeys/...
-CB_API_SECRET = -----BEGIN EC PRIVATE KEY----- ... -----END EC PRIVATE KEY-----
+Versión con cliente oficial RESTClient de Coinbase.
 
-Seguridad:
-- DRY_RUN=true por defecto
-- Riesgo por trade: 1.5 %
-- Stop Loss, Take Profit, Trailing Stop y Break-even
-- Filtro de tendencia, volumen y mercado lateral
+Variables necesarias en Render:
+TELEGRAM_TOKEN
+CHAT_ID
+CB_API_KEY
+CB_API_SECRET
+DRY_RUN=true
+
+Recomendado:
+PYTHON_VERSION=3.11.9
 """
 
 import os
@@ -22,8 +27,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Dict, Any, List
 
-import requests
-from coinbase.jwt_generator import build_rest_jwt, format_jwt_uri
+from coinbase.rest import RESTClient
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -42,7 +46,7 @@ CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
 PRODUCT_ID = os.getenv("PRODUCT_ID", "BTC-USDC").strip()
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 
-# Solicitado: riesgo 1.5 %
+# Riesgo solicitado: 1.5 %
 MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.015"))
 
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
@@ -59,16 +63,29 @@ MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "500"))
 
-COINBASE_HOST = "api.coinbase.com"
-COINBASE_API_URL = f"https://{COINBASE_HOST}"
-
 
 # =========================
 # LOGGING
 # =========================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("btc-bot-avanzado")
+logger = logging.getLogger("btc-bot-restclient")
+
+
+# =========================
+# COINBASE CLIENT
+# =========================
+
+client: Optional[RESTClient] = None
+
+
+def get_client() -> RESTClient:
+    global client
+    if client is None:
+        if not CB_API_KEY or not CB_API_SECRET:
+            raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET en Render.")
+        client = RESTClient(api_key=CB_API_KEY, api_secret=CB_API_SECRET)
+    return client
 
 
 # =========================
@@ -206,77 +223,88 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# COINBASE CDP JWT AUTH
+# COINBASE FUNCTIONS
 # =========================
-
-def coinbase_auth_headers(method: str, path: str) -> Dict[str, str]:
-    if not CB_API_KEY or not CB_API_SECRET:
-        raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET en Render.")
-
-    uri = format_jwt_uri(method.upper(), path)
-    token = build_rest_jwt(uri, CB_API_KEY, CB_API_SECRET)
-
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-
-def coinbase_request(method: str, path: str, payload: Optional[Dict[str, Any]] = None, auth: bool = True) -> Dict[str, Any]:
-    url = COINBASE_API_URL + path
-    headers = coinbase_auth_headers(method, path) if auth else {"Accept": "application/json"}
-
-    response = requests.request(method.upper(), url, headers=headers, json=payload if payload else None, timeout=25)
-
-    if response.status_code >= 400:
-        raise RuntimeError(f"Coinbase error {response.status_code}: {response.text[:800]}")
-
-    return response.json() if response.text else {}
-
 
 def get_candles(granularity: str = "FIVE_MINUTE", limit: int = 180) -> List[Dict[str, Any]]:
     end = int(time.time())
     start = end - (limit * 300)
-    path = f"/api/v3/brokerage/products/{PRODUCT_ID}/candles?start={start}&end={end}&granularity={granularity}"
-    data = coinbase_request("GET", path, auth=True)
-    candles = data.get("candles", [])
-    return sorted(candles, key=lambda c: int(c.get("start", 0)))
+
+    cb = get_client()
+    response = cb.get_candles(
+        product_id=PRODUCT_ID,
+        start=str(start),
+        end=str(end),
+        granularity=granularity
+    )
+
+    candles = getattr(response, "candles", None)
+    if candles is None and isinstance(response, dict):
+        candles = response.get("candles", [])
+
+    result = []
+    for c in candles:
+        if isinstance(c, dict):
+            result.append(c)
+        else:
+            result.append({
+                "start": getattr(c, "start", 0),
+                "low": getattr(c, "low", 0),
+                "high": getattr(c, "high", 0),
+                "open": getattr(c, "open", 0),
+                "close": getattr(c, "close", 0),
+                "volume": getattr(c, "volume", 0),
+            })
+
+    return sorted(result, key=lambda x: int(x.get("start", 0)))
 
 
 def get_usdc_balance() -> float:
     if DRY_RUN:
         return DRY_RUN_BALANCE
 
-    data = coinbase_request("GET", "/api/v3/brokerage/accounts", auth=True)
+    cb = get_client()
+    response = cb.get_accounts()
 
-    for account in data.get("accounts", []):
-        if account.get("currency") == "USDC":
-            return float(account.get("available_balance", {}).get("value", 0))
+    accounts = getattr(response, "accounts", None)
+    if accounts is None and isinstance(response, dict):
+        accounts = response.get("accounts", [])
+
+    for account in accounts:
+        if isinstance(account, dict):
+            currency = account.get("currency")
+            available = account.get("available_balance", {}).get("value", 0)
+        else:
+            currency = getattr(account, "currency", "")
+            available_balance = getattr(account, "available_balance", None)
+            available = getattr(available_balance, "value", 0) if available_balance else 0
+
+        if currency == "USDC":
+            return float(available)
 
     return 0.0
 
 
 def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None):
+    if DRY_RUN:
+        logger.info("[DRY_RUN] Orden simulada: side=%s quote=%s base=%s", side, quote_size, base_size)
+        return {"dry_run": True}
+
+    cb = get_client()
     client_order_id = f"btc-bot-{int(time.time())}"
 
     if side.upper() == "BUY":
-        order_config = {"market_market_ioc": {"quote_size": str(round(float(quote_size), 2))}}
-    else:
-        order_config = {"market_market_ioc": {"base_size": str(round(float(base_size), 8))}}
+        return cb.market_order_buy(
+            client_order_id=client_order_id,
+            product_id=PRODUCT_ID,
+            quote_size=str(round(float(quote_size), 2))
+        )
 
-    payload = {
-        "client_order_id": client_order_id,
-        "product_id": PRODUCT_ID,
-        "side": side.upper(),
-        "order_configuration": order_config,
-    }
-
-    if DRY_RUN:
-        logger.info("[DRY_RUN] Orden simulada: %s", payload)
-        return {"dry_run": True, "payload": payload}
-
-    return coinbase_request("POST", "/api/v3/brokerage/orders", payload, auth=True)
+    return cb.market_order_sell(
+        client_order_id=client_order_id,
+        product_id=PRODUCT_ID,
+        base_size=str(round(float(base_size), 8))
+    )
 
 
 # =========================
@@ -357,7 +385,7 @@ def volume_ratio(candles: List[Dict[str, Any]], period: int = 20) -> float:
 
 
 # =========================
-# ESTRATEGIA AVANZADA
+# ESTRATEGIA
 # =========================
 
 def analyze_market(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -595,6 +623,7 @@ def validate_config():
 
 def main():
     validate_config()
+    get_client()
 
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
@@ -605,13 +634,32 @@ def main():
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("signal", signal_cmd))
     app.add_handler(CommandHandler("config", config_cmd))
-
-    # Alias opcional: si escribes /resume también activa, pero el menú muestra /start.
     app.add_handler(CommandHandler("resume", start_cmd))
 
-    logger.info("Iniciando BTC Bot Seguro Avanzado...")
+    logger.info("Iniciando BTC Bot Seguro Avanzado con RESTClient...")
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
+'''
+
+requirements = """python-telegram-bot==20.7
+requests==2.31.0
+coinbase-advanced-py==1.8.2
+cryptography
+PyJWT
+"""
+
+Path("/mnt/data/btc_bot_restclient_completo.py").write_text(code)
+Path("/mnt/data/requirements_restclient.txt").write_text(requirements)
+
+zip_path = Path("/mnt/data/btc_bot_restclient_completo.zip")
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("btc_bot.py", code)
+    z.writestr("requirements.txt", requirements)
+    z.writestr("runtime.txt", "python-3.11.9\n")
+
+print("/mnt/data/btc_bot_restclient_completo.py")
+print("/mnt/data/requirements_restclient.txt")
+print("/mnt/data/btc_bot_restclient_completo.zip")
