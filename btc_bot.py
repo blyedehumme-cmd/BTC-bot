@@ -644,6 +644,7 @@ async def trading_loop(app: Application):
 
             if daily_loss_limit_reached(balance):
                 state.active = False
+                save_state()
                 await send_telegram(app, "🛑 Bot pausado: límite de pérdida diaria alcanzado.")
                 await asyncio.sleep(ANALYZE_EVERY_SECONDS)
                 continue
