@@ -658,8 +658,8 @@ async def trading_loop(app: Application):
                 if exit_reason:
                     place_market_order("SELL", base_size=state.position_size_btc)
                     record_trade_pnl(price)
-
-                                        pnl = (price - state.entry_price) * state.position_size_btc
+                    
+                    pnl = (price - state.entry_price) * state.position_size_btc
 
                     win_rate = (
                         (state.stats.wins / state.stats.total_trades) * 100
