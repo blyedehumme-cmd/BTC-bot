@@ -120,7 +120,7 @@ class BotState:
     last_confidence: float = 0.0
     last_reason: str = "Sin análisis todavía."
     stats: TradeStats = field(default_factory=TradeStats)
-
+    trade_history: List[Dict[str, Any]] = field(default_factory=list)
 
 state = BotState()
 def save_state():
@@ -156,6 +156,7 @@ def save_state():
                     "last_signal": state.last_signal,
                     "last_confidence": state.last_confidence,
                     "last_reason": state.last_reason,
+                    "trade_history": state.trade_history,
                     "stats": {
                         "total_trades": state.stats.total_trades,
                         "wins": state.stats.wins,
