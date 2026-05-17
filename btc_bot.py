@@ -122,7 +122,112 @@ class BotState:
 
 
 state = BotState()
+def save_state():
+    """
+    Guarda el estado actual del bot en un archivo JSON.
+    """
 
+    directory = os.path.dirname(os.path.abspath(STATE_FILE)) or "."
+    temp_path = None
+
+    try:
+        fd, temp_path = tempfile.mkstemp(
+            prefix="bot_state_",
+            suffix=".json",
+            dir=directory
+        )
+
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "active": state.active,
+                    "position_open": state.position_open,
+                    "entry_price": state.entry_price,
+                    "position_size_btc": state.position_size_btc,
+                    "position_usd": state.position_usd,
+                    "stop_loss": state.stop_loss,
+                    "initial_stop_loss": state.initial_stop_loss,
+                    "take_profit": state.take_profit,
+                    "highest_price": state.highest_price,
+                    "last_trade_ts": state.last_trade_ts,
+                    "day": state.day,
+                    "starting_day_balance": state.starting_day_balance,
+                    "last_signal": state.last_signal,
+                    "last_confidence": state.last_confidence,
+                    "last_reason": state.last_reason,
+                    "stats": {
+                        "total_trades": state.stats.total_trades,
+                        "wins": state.stats.wins,
+                        "losses": state.stats.losses,
+                        "simulated_pnl_usd": state.stats.simulated_pnl_usd,
+                        "best_trade": state.stats.best_trade,
+                        "worst_trade": state.stats.worst_trade,
+                    },
+                },
+                file,
+                indent=2
+            )
+
+            file.flush()
+            os.fsync(file.fileno())
+
+        os.replace(temp_path, STATE_FILE)
+
+    except Exception as e:
+        logger.error("Error guardando estado: %s", e)
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def load_state():
+    """
+    Carga el estado guardado del bot.
+    """
+
+    global state
+
+    if not os.path.exists(STATE_FILE):
+        logger.info("No existe archivo de estado.")
+        return
+
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        stats_data = data.get("stats", {})
+
+        state.active = bool(data.get("active", True))
+        state.position_open = bool(data.get("position_open", False))
+        state.entry_price = float(data.get("entry_price", 0.0))
+        state.position_size_btc = float(data.get("position_size_btc", 0.0))
+        state.position_usd = float(data.get("position_usd", 0.0))
+        state.stop_loss = float(data.get("stop_loss", 0.0))
+        state.initial_stop_loss = float(data.get("initial_stop_loss", 0.0))
+        state.take_profit = float(data.get("take_profit", 0.0))
+        state.highest_price = float(data.get("highest_price", 0.0))
+        state.last_trade_ts = float(data.get("last_trade_ts", 0.0))
+        state.day = str(data.get("day", ""))
+        state.starting_day_balance = float(data.get("starting_day_balance", 0.0))
+        state.last_signal = str(data.get("last_signal", "WAIT"))
+        state.last_confidence = float(data.get("last_confidence", 0.0))
+        state.last_reason = str(data.get("last_reason", ""))
+
+        state.stats.total_trades = int(stats_data.get("total_trades", 0))
+        state.stats.wins = int(stats_data.get("wins", 0))
+        state.stats.losses = int(stats_data.get("losses", 0))
+        state.stats.simulated_pnl_usd = float(stats_data.get("simulated_pnl_usd", 0.0))
+        state.stats.best_trade = float(stats_data.get("best_trade", 0.0))
+        state.stats.worst_trade = float(stats_data.get("worst_trade", 0.0))
+
+        logger.info("Estado cargado correctamente.")
+
+    except Exception as e:
+        logger.error("Error cargando estado: %s", e)
 
 # =========================
 # TELEGRAM
