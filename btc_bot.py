@@ -61,7 +61,7 @@ BREAK_EVEN_TRIGGER_R = float(os.getenv("BREAK_EVEN_TRIGGER_R", "1.5"))
 
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
-DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "500"))
+DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
 
 # =========================
