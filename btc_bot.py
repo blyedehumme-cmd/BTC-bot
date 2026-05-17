@@ -674,7 +674,8 @@ async def trading_loop(app: Application):
                     state.take_profit = 0.0
                     state.highest_price = 0.0
                     state.last_trade_ts = time.time()
-
+                    save_state()
+                    
             elif can_trade_now() and analysis["signal"] == "BUY":
                 btc_size = calculate_position_size(balance, price, analysis["atr"])
                 usd_size = btc_size * price
@@ -694,7 +695,8 @@ async def trading_loop(app: Application):
                     state.take_profit = take
                     state.highest_price = price
                     state.last_trade_ts = time.time()
-
+                    save_state()
+                    
                     await send_telegram(
                         app,
                         f"🟢 Compra {'simulada' if DRY_RUN else 'real'}\n"
