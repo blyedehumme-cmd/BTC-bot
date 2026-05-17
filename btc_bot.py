@@ -234,7 +234,7 @@ def load_state():
 # =========================
 
 async def send_telegram(app: Optional[Application], message: str):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
+    if not TELEGRAM_TOKEN or not CHAT_ID: 
         logger.info("Telegram no configurado: %s", message)
         return
     try:
@@ -246,6 +246,8 @@ async def send_telegram(app: Optional[Application], message: str):
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state.active = True
+    save_state()
+    
     await update.message.reply_text(
         "✅ BTC Bot Seguro activo.\n\n"
         "Comandos:\n"
