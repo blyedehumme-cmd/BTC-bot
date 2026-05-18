@@ -527,7 +527,7 @@ def analyze_market(
         ema50 = ema(closes[-100:], 50)
         ema100 = ema(closes[-160:], 100)
 
-    checks = [
+        checks = [
         (price > ema21 > ema50, 0.24, "EMA21 > EMA50 y precio encima"),
         (price > ema100, 0.18, "precio encima de EMA100"),
         (macd_val["macd"] > macd_val["signal"] and macd_val["hist"] > 0, 0.20, "MACD positivo"),
