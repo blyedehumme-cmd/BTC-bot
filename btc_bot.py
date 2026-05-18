@@ -503,32 +503,38 @@ def analyze_market(
     candles_4h: List[Dict[str, Any]],
     candles_1d: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
-       if (
+    # Verificar que haya suficientes velas en cada marco
+    if (
         len(candles_1h) < 60 or
         len(candles_4h) < 60 or
         len(candles_1d) < 60
     ):
-        return {"signal": "WAIT", "confidence": 0.0, "price": 0.0, "atr": 0.0, "reason": "No hay suficientes velas."}
+        return {
+            "signal": "WAIT",
+            "confidence": 0.0,
+            "price": 0.0,
+            "atr": 0.0,
+            "reason": "No hay suficientes velas.",
+        }
 
-        closes_1h = [float(c["close"]) for c in candles_1h]
-        closes_4h = [float(c["close"]) for c in candles_4h]
-        closes_1d = [float(c["close"]) for c in candles_1d]
+    closes_1h = [float(c["close"]) for c in candles_1h]
+    closes_4h = [float(c["close"]) for c in candles_4h]
+    closes_1d = [float(c["close"]) for c in candles_1d]
 
-        closes = closes_1h
-        price = closes[-1]
+    closes = closes_1h
+    price = closes[-1]
 
-        rsi_val = rsi(closes)
-        macd_val = macd(closes)
-        bb = bollinger(closes)
-        atr_val = atr(candles_1h)
-        vol_ratio = volume_ratio(candles_1h)
+    rsi_val = rsi(closes)
+    macd_val = macd(closes)
+    bb = bollinger(closes)
+    atr_val = atr(candles_1h)
+    vol_ratio = volume_ratio(candles_1h)
 
-        ema21 = ema(closes[-60:], 21)
-        ema50 = ema(closes[-100:], 50)
-        ema100 = ema(closes[-160:], 100)
-    
-        checks = [
-       
+    ema21 = ema(closes[-60:], 21)
+    ema50 = ema(closes[-100:], 50)
+    ema100 = ema(closes[-160:], 100)
+
+    checks = [
         (price > ema21 > ema50, 0.24, "EMA21 > EMA50 y precio encima"),
         (price > ema100, 0.18, "precio encima de EMA100"),
         (macd_val["macd"] > macd_val["signal"] and macd_val["hist"] > 0, 0.20, "MACD positivo"),
@@ -536,17 +542,16 @@ def analyze_market(
         (price < bb["upper"], 0.10, "precio no está extremo"),
         (bb["width_pct"] >= 0.45, 0.07, "mercado no está tan lateral"),
         (vol_ratio >= 0.75, 0.05, "volumen aceptable"),
-  ]
+    ]
 
     score = 0.0
-    reasons = []
+    reasons: List[str] = []
     for ok, points, reason in checks:
         if ok:
             score += points
-            reasons.append (reason)
+            reasons.append(reason)
 
     signal = "BUY" if score >= MIN_CONFIDENCE else "WAIT"
-        
 
     return {
         "signal": signal,
@@ -646,23 +651,19 @@ async def trading_loop(app: Application):
 
     while True:
         try:
-              candles_1h = get_candles(granularity="ONE_HOUR", limit=180)
-              candles_4h = get_candles(granularity="FOUR_HOUR", limit=180)
-              candles_1d = get_candles(granularity="ONE_DAY", limit=180)
+            candles_1h = get_candles(granularity="ONE_HOUR", limit=180)
+            candles_4h = get_candles(granularity="FOUR_HOUR", limit=180)
+            candles_1d = get_candles(granularity="ONE_DAY", limit=180)
 
-    analysis = analyze_market(
-              candles_1h,
-              candles_4h,
-              candles_1d
-    )
+            analysis = analyze_market(candles_1h, candles_4h, candles_1d)
 
             price = analysis.get("price", 0.0)
             balance = get_usdc_balance()
 
             reset_daily_balance_if_needed(balance)
 
-            state.last_signal = analysis["signal"]
-            state.last_confidence = analysis["confidence"]
+            state.last_signal = analysis.get("signal", "WAIT")
+            state.last_confidence = analysis.get("confidence", 0.0)
             state.last_reason = analysis.get("reason", "")
 
             if daily_loss_limit_reached(balance):
@@ -672,7 +673,13 @@ async def trading_loop(app: Application):
                 await asyncio.sleep(ANALYZE_EVERY_SECONDS)
                 continue
 
-            logger.info("Precio %.2f | Señal %s | Confianza %.2f | %s", price, analysis["signal"], analysis["confidence"], state.last_reason)
+            logger.info(
+                "Precio %.2f | Señal %s | Confianza %.2f | %s",
+                price,
+                analysis.get("signal"),
+                analysis.get("confidence"),
+                state.last_reason,
+            )
 
             if state.position_open:
                 exit_reason = manage_open_position(price, analysis.get("atr", 0.0))
@@ -680,17 +687,18 @@ async def trading_loop(app: Application):
                 if exit_reason:
                     place_market_order("SELL", base_size=state.position_size_btc)
                     record_trade_pnl(price)
-                    
+
                     pnl = (price - state.entry_price) * state.position_size_btc
 
                     win_rate = (
                         (state.stats.wins / state.stats.total_trades) * 100
-                        if state.stats.total_trades > 0 else 0
+                        if state.stats.total_trades > 0
+                        else 0
                     )
 
                     await send_telegram(
                         app,
-                        f"{'🟢' if pnl >= 0 else '🔴'} Trade {'ganado' if pnl >= 0 else 'perdido'}\n"
+                        f"{('🟢' if pnl >= 0 else '🔴')} Trade {('ganado' if pnl >= 0 else 'perdido')}\n"
                         f"Resultado: ${pnl:.2f}\n"
                         f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
                         f"Win Rate: {win_rate:.2f}%\n"
@@ -710,14 +718,14 @@ async def trading_loop(app: Application):
                     state.highest_price = 0.0
                     state.last_trade_ts = time.time()
                     save_state()
-                    
-            elif can_trade_now() and analysis["signal"] == "BUY":
-                btc_size = calculate_position_size(balance, price, analysis["atr"])
+
+            elif can_trade_now() and analysis.get("signal") == "BUY":
+                btc_size = calculate_position_size(balance, price, analysis.get("atr", 0.0))
                 usd_size = btc_size * price
 
                 if usd_size >= MIN_ORDER_USD:
-                    stop = price - (analysis["atr"] * STOP_LOSS_ATR_MULTIPLIER)
-                    take = price + (analysis["atr"] * TAKE_PROFIT_ATR_MULTIPLIER)
+                    stop = price - (analysis.get("atr", 0.0) * STOP_LOSS_ATR_MULTIPLIER)
+                    take = price + (analysis.get("atr", 0.0) * TAKE_PROFIT_ATR_MULTIPLIER)
 
                     place_market_order("BUY", quote_size=usd_size)
 
@@ -731,17 +739,17 @@ async def trading_loop(app: Application):
                     state.highest_price = price
                     state.last_trade_ts = time.time()
                     save_state()
-                    
+
                     await send_telegram(
                         app,
-                        f"🟢 Compra {'simulada' if DRY_RUN else 'real'}\n"
+                        f"🟢 Compra {('simulada' if DRY_RUN else 'real')}\n"
                         f"Precio: {price:.2f}\n"
                         f"USD: {usd_size:.2f}\n"
                         f"BTC: {btc_size:.8f}\n"
                         f"Stop: {stop:.2f}\n"
                         f"Take Profit: {take:.2f}\n"
-                        f"Confianza: {analysis['confidence']:.2f}\n"
-                        f"Razón: {analysis['reason']}"
+                        f"Confianza: {analysis.get('confidence', 0.0):.2f}\n"
+                        f"Razón: {analysis.get('reason', '')}"
                     )
 
         except Exception as e:
