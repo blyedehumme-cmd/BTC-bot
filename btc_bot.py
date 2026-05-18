@@ -336,7 +336,7 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # COINBASE FUNCTIONS
 # =========================
 
-def get_candles(granularity: str = "one_hour", limit: int = 180) -> List[Dict[str, Any]]:
+def get_candles(granularity: str = "ONE_HOUR", limit: int = 180) -> List[Dict[str, Any]]:
     end = int(time.time())
     start = end - (limit * 3600)
 
