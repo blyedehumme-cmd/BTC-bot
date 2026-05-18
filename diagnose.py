@@ -32,19 +32,24 @@ def make_candles(n, start_price=50000.0):
 candles_1h = make_candles(180)
 candles_4h = make_candles(180)
 candles_1d = make_candles(180)
+candles_1w = make_candles(80, start_price=49500.0)
 
-print('Ejecutando analyze_market con velas simuladas...')
-analysis = btc.analyze_market(candles_1h, candles_4h, candles_1d)
-print('Analysis:', analysis)
+print('Ejecutando diagnóstico interno con velas simuladas...')
+weekly = btc.timeframe_analysis(candles_1w, '1W')
+daily = btc.timeframe_analysis(candles_1d, '1D')
+fourh = btc.timeframe_analysis(candles_4h, '4H')
+hourly = btc.timeframe_analysis(candles_1h, '1H')
+print('Weekly:', weekly)
+print('Daily:', daily)
+print('4H:', fourh)
+print('1H:', hourly)
 
-price = analysis.get('price', 0.0)
-print('Precio:', price)
+signal = btc.build_signal(weekly, daily, fourh, hourly)
+print('Señal construida:', signal)
 
 balance = btc.get_usdc_balance()
 print('Balance USDC (DRY_RUN):', balance)
-
-size = btc.calculate_position_size(balance, price, analysis.get('atr', 0.0))
-print('Tamaño posición (USD):', size * price if price else 0.0)
+size = btc.calculate_position_size(balance, hourly['price'], signal.get('atr', 0.0))
 print('Tamaño posición (BTC):', size)
-
+print('Tamaño posición (USD):', size * hourly['price'] if hourly['price'] else 0.0)
 print('Diagnóstico completado.')

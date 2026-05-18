@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
 """
-BTC Bot Seguro Avanzado - Coinbase Advanced Trade + Telegram
+BTC Bot Seguro Avanzado - Arquitectura Profesional Multi-Timeframe + IA Asistida
 
-Versión con cliente oficial RESTClient de Coinbase.
-
-Variables necesarias en Render:
-TELEGRAM_TOKEN
-CHAT_ID
-CB_API_KEY
-CB_API_SECRET
-DRY_RUN=true
-
-Recomendado:
-PYTHON_VERSION=3.11.9
+Fase 1: Base LONG/SHORT, multi-timeframe, trailing stop, Telegram, gestión de riesgo.
 """
 
 import os
@@ -23,14 +13,12 @@ import tempfile
 import logging
 import asyncio
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
 
 from coinbase.rest import RESTClient
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-
 
 # =========================
 # CONFIGURACIÓN
@@ -38,55 +26,54 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
-
 CB_API_KEY = os.getenv("CB_API_KEY", "").strip()
 CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
-
 PRODUCT_ID = os.getenv("PRODUCT_ID", "BTC-USDC").strip()
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 
-# Riesgo solicitado: 1.5 %
-MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.015"))
-
+MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.0125"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
-MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.76"))
+MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.70"))
 MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "60"))
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
 ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
-
-STOP_LOSS_ATR_MULTIPLIER = float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "1.8"))
-TAKE_PROFIT_ATR_MULTIPLIER = float(os.getenv("TAKE_PROFIT_ATR_MULTIPLIER", "4.5"))
-TRAILING_STOP_ATR_MULTIPLIER = float(os.getenv("TRAILING_STOP_ATR_MULTIPLIER", "2.2"))
-BREAK_EVEN_TRIGGER_R = float(os.getenv("BREAK_EVEN_TRIGGER_R", "1.5"))
-
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
+
+EMA_FAST = 21
+EMA_MID = 50
+EMA_SLOW = 100
+MACD_FAST = 21
+MACD_SLOW = 50
+MACD_SIGNAL = 10
+ADX_PERIOD = 14
+ADX_THRESHOLD = 23.0
+VOLUME_HEALTH_MIN = 0.75
+
+TIMEFRAMES = {
+    "1H": "ONE_HOUR",
+    "4H": "FOUR_HOUR",
+    "1D": "ONE_DAY",
+    "1W": "ONE_WEEK",
+}
+
+CANDLE_LIMITS = {
+    "1H": 160,
+    "4H": 120,
+    "1D": 100,
+    "1W": 80,
+}
 
 # =========================
 # LOGGING
 # =========================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("btc-bot-restclient")
-
-
-# =========================
-# COINBASE CLIENT
-# =========================
+logger = logging.getLogger("btc-bot-advanced")
 
 client: Optional[RESTClient] = None
-
-
-def get_client() -> RESTClient:
-    global client
-    if client is None:
-        if not CB_API_KEY or not CB_API_SECRET:
-            raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET en Render.")
-        client = RESTClient(api_key=CB_API_KEY, api_secret=CB_API_SECRET)
-    return client
-
 
 # =========================
 # ESTADO
@@ -106,6 +93,7 @@ class TradeStats:
 class BotState:
     active: bool = True
     position_open: bool = False
+    side: Optional[str] = None
     entry_price: float = 0.0
     position_size_btc: float = 0.0
     position_usd: float = 0.0
@@ -123,61 +111,20 @@ class BotState:
     trade_history: List[Dict[str, Any]] = field(default_factory=list)
 
 state = BotState()
-def save_state():
-    """
-    Guarda el estado actual del bot en un archivo JSON.
-    """
 
+
+def save_state():
     directory = os.path.dirname(os.path.abspath(STATE_FILE)) or "."
     temp_path = None
-
     try:
-        fd, temp_path = tempfile.mkstemp(
-            prefix="bot_state_",
-            suffix=".json",
-            dir=directory
-        )
-
+        fd, temp_path = tempfile.mkstemp(prefix="bot_state_", suffix=".json", dir=directory)
         with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump(
-                {
-                    "active": state.active,
-                    "position_open": state.position_open,
-                    "entry_price": state.entry_price,
-                    "position_size_btc": state.position_size_btc,
-                    "position_usd": state.position_usd,
-                    "stop_loss": state.stop_loss,
-                    "initial_stop_loss": state.initial_stop_loss,
-                    "take_profit": state.take_profit,
-                    "highest_price": state.highest_price,
-                    "last_trade_ts": state.last_trade_ts,
-                    "day": state.day,
-                    "starting_day_balance": state.starting_day_balance,
-                    "last_signal": state.last_signal,
-                    "last_confidence": state.last_confidence,
-                    "last_reason": state.last_reason,
-                    "trade_history": state.trade_history,
-                    "stats": {
-                        "total_trades": state.stats.total_trades,
-                        "wins": state.stats.wins,
-                        "losses": state.stats.losses,
-                        "simulated_pnl_usd": state.stats.simulated_pnl_usd,
-                        "best_trade": state.stats.best_trade,
-                        "worst_trade": state.stats.worst_trade,
-                    },
-                },
-                file,
-                indent=2
-            )
-
+            json.dump(state.__dict__, file, default=lambda o: o.__dict__, indent=2)
             file.flush()
             os.fsync(file.fileno())
-
         os.replace(temp_path, STATE_FILE)
-
     except Exception as e:
         logger.error("Error guardando estado: %s", e)
-
     finally:
         if temp_path and os.path.exists(temp_path):
             try:
@@ -187,56 +134,386 @@ def save_state():
 
 
 def load_state():
-    """
-    Carga el estado guardado del bot.
-    """
-
     global state
-
     if not os.path.exists(STATE_FILE):
         logger.info("No existe archivo de estado.")
         return
-
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-
-        stats_data = data.get("stats", {})
-
-        state.active = bool(data.get("active", True))
-        state.position_open = bool(data.get("position_open", False))
-        state.entry_price = float(data.get("entry_price", 0.0))
-        state.position_size_btc = float(data.get("position_size_btc", 0.0))
-        state.position_usd = float(data.get("position_usd", 0.0))
-        state.stop_loss = float(data.get("stop_loss", 0.0))
-        state.initial_stop_loss = float(data.get("initial_stop_loss", 0.0))
-        state.take_profit = float(data.get("take_profit", 0.0))
-        state.highest_price = float(data.get("highest_price", 0.0))
-        state.last_trade_ts = float(data.get("last_trade_ts", 0.0))
-        state.day = str(data.get("day", ""))
-        state.starting_day_balance = float(data.get("starting_day_balance", 0.0))
-        state.last_signal = str(data.get("last_signal", "WAIT"))
-        state.last_confidence = float(data.get("last_confidence", 0.0))
-        state.last_reason = str(data.get("last_reason", ""))
-
-        state.stats.total_trades = int(stats_data.get("total_trades", 0))
-        state.stats.wins = int(stats_data.get("wins", 0))
-        state.stats.losses = int(stats_data.get("losses", 0))
-        state.stats.simulated_pnl_usd = float(stats_data.get("simulated_pnl_usd", 0.0))
-        state.stats.best_trade = float(stats_data.get("best_trade", 0.0))
-        state.stats.worst_trade = float(stats_data.get("worst_trade", 0.0))
-
+        state = BotState(**data)
         logger.info("Estado cargado correctamente.")
-
     except Exception as e:
         logger.error("Error cargando estado: %s", e)
+
+
+# =========================
+# API CLIENT
+# =========================
+
+def get_client() -> RESTClient:
+    global client
+    if client is None:
+        if not CB_API_KEY or not CB_API_SECRET:
+            raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET en Render.")
+        client = RESTClient(api_key=CB_API_KEY, api_secret=CB_API_SECRET)
+    return client
+
+
+def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
+    granularity = TIMEFRAMES[timeframe]
+    end_ts = int(time.time())
+    start_ts = end_ts - (limit * {
+        "1H": 3600,
+        "4H": 14400,
+        "1D": 86400,
+        "1W": 604800,
+    }[timeframe])
+    cb = get_client()
+    response = cb.get_candles(product_id=PRODUCT_ID, start=str(start_ts), end=str(end_ts), granularity=granularity)
+    candles = getattr(response, "candles", None)
+    if candles is None and isinstance(response, dict):
+        candles = response.get("candles", [])
+    result = []
+    for c in candles:
+        if isinstance(c, dict):
+            result.append(c)
+        else:
+            result.append({
+                "start": getattr(c, "start", 0),
+                "low": getattr(c, "low", 0),
+                "high": getattr(c, "high", 0),
+                "open": getattr(c, "open", 0),
+                "close": getattr(c, "close", 0),
+                "volume": getattr(c, "volume", 0),
+            })
+    return sorted(result, key=lambda x: int(x.get("start", 0)))
+
+
+def get_usdc_balance() -> float:
+    if DRY_RUN:
+        return DRY_RUN_BALANCE
+    cb = get_client()
+    response = cb.get_accounts()
+    accounts = getattr(response, "accounts", None)
+    if accounts is None and isinstance(response, dict):
+        accounts = response.get("accounts", [])
+    for account in accounts:
+        if isinstance(account, dict):
+            currency = account.get("currency")
+            available = account.get("available_balance", {}).get("value", 0)
+        else:
+            currency = getattr(account, "currency", "")
+            available_balance = getattr(account, "available_balance", None)
+            available = getattr(available_balance, "value", 0) if available_balance else 0
+        if currency == "USDC":
+            return float(available)
+    return 0.0
+
+
+def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None) -> Dict[str, Any]:
+    if DRY_RUN:
+        logger.info("[DRY_RUN] Orden simulada: %s quote=%s base=%s", side, quote_size, base_size)
+        return {"dry_run": True, "side": side, "quote_size": quote_size, "base_size": base_size}
+    cb = get_client()
+    client_order_id = f"btc-bot-{int(time.time())}"
+    if side.upper() == "BUY":
+        return cb.market_order_buy(client_order_id=client_order_id, product_id=PRODUCT_ID, quote_size=str(round(float(quote_size), 2)))
+    return cb.market_order_sell(client_order_id=client_order_id, product_id=PRODUCT_ID, base_size=str(round(float(base_size), 8)))
+
+
+# =========================
+# INDICADORES
+# =========================
+
+def ema(values: List[float], period: int) -> float:
+    if not values or period <= 0:
+        return 0.0
+    k = 2 / (period + 1)
+    e = values[0]
+    for price in values[1:]:
+        e = price * k + e * (1 - k)
+    return e
+
+
+def macd(values: List[float]) -> Dict[str, float]:
+    if len(values) < MACD_SLOW + MACD_SIGNAL:
+        return {"macd": 0.0, "signal": 0.0, "hist": 0.0}
+    macd_line = ema(values, MACD_FAST) - ema(values, MACD_SLOW)
+    macd_series = []
+    for i in range(MACD_SLOW + MACD_SIGNAL, len(values) + 1):
+        window = values[:i]
+        macd_series.append(ema(window, MACD_FAST) - ema(window, MACD_SLOW))
+    signal = ema(macd_series[-MACD_SIGNAL:], MACD_SIGNAL) if len(macd_series) >= MACD_SIGNAL else macd_line
+    return {"macd": macd_line, "signal": signal, "hist": macd_line - signal}
+
+
+def adx(candles: List[Dict[str, Any]], period: int = ADX_PERIOD) -> float:
+    if len(candles) < period + 2:
+        return 0.0
+    tr = []
+    plus_dm = []
+    minus_dm = []
+    for i in range(1, len(candles)):
+        high = float(candles[i]["high"])
+        low = float(candles[i]["low"])
+        prev_high = float(candles[i - 1]["high"])
+        prev_low = float(candles[i - 1]["low"])
+        tr.append(max(high - low, abs(high - float(candles[i - 1]["close"])), abs(low - float(candles[i - 1]["close"]))))
+        up_move = high - prev_high
+        down_move = prev_low - low
+        plus_dm.append(up_move if up_move > down_move and up_move > 0 else 0.0)
+        minus_dm.append(down_move if down_move > up_move and down_move > 0 else 0.0)
+    atr_val = sum(tr[-period:]) / period
+    plus_di = 100 * (sum(plus_dm[-period:]) / atr_val) if atr_val else 0.0
+    minus_di = 100 * (sum(minus_dm[-period:]) / atr_val) if atr_val else 0.0
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di) if plus_di + minus_di else 0.0
+    return dx
+
+
+def bollinger(values: List[float], period: int = 20, mult: float = 2.0) -> Dict[str, float]:
+    if len(values) < 2:
+        return {"upper": 0.0, "middle": 0.0, "lower": 0.0, "width_pct": 0.0}
+    recent = values[-period:] if len(values) >= period else values
+    mid = sum(recent) / len(recent)
+    variance = sum((x - mid) ** 2 for x in recent) / len(recent)
+    std = math.sqrt(variance)
+    width_pct = ((2 * mult * std) / mid * 100) if mid else 0.0
+    return {"upper": mid + mult * std, "middle": mid, "lower": mid - mult * std, "width_pct": width_pct}
+
+
+def volume_ratio(candles: List[Dict[str, Any]], period: int = 20) -> float:
+    volumes = [float(c.get("volume", 0)) for c in candles]
+    if len(volumes) < period + 1:
+        return 1.0
+    avg = sum(volumes[-period - 1:-1]) / period
+    return volumes[-1] / avg if avg else 1.0
+
+
+# =========================
+# ESTRATEGIA MULTI-TIMEFRAME
+# =========================
+
+def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str) -> Dict[str, Any]:
+    closes = [float(c["close"]) for c in candles]
+    if len(closes) < EMA_SLOW + 1:
+        return {
+            "trend": "neutral",
+            "price": closes[-1] if closes else 0.0,
+            "ema21": 0.0,
+            "ema50": 0.0,
+            "ema100": 0.0,
+            "macd": {"macd": 0.0, "signal": 0.0, "hist": 0.0},
+            "adx": 0.0,
+            "volume_ratio": 1.0,
+        }
+    ema21_val = ema(closes[-80:], EMA_FAST)
+    ema50_val = ema(closes[-120:], EMA_MID)
+    ema100_val = ema(closes[-160:], EMA_SLOW)
+    macd_val = macd(closes)
+    adx_val = adx(candles[-(ADX_PERIOD + 1):])
+    vol_ratio = volume_ratio(candles)
+    price = closes[-1]
+    trend = "bull" if ema21_val > ema50_val and price > ema100_val else "bear" if ema21_val < ema50_val and price < ema100_val else "neutral"
+    return {
+        "trend": trend,
+        "price": price,
+        "ema21": ema21_val,
+        "ema50": ema50_val,
+        "ema100": ema100_val,
+        "macd": macd_val,
+        "adx": adx_val,
+        "volume_ratio": vol_ratio,
+    }
+
+
+def ai_quality_filter(analysis: Dict[str, Any]) -> bool:
+    if analysis["adx"] < ADX_THRESHOLD:
+        return False
+    if analysis["volume_ratio"] < VOLUME_HEALTH_MIN:
+        return False
+    return True
+
+
+def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
+    good_weekly_long = weekly["trend"] in ["bull", "neutral"] and weekly["price"] >= weekly["ema100"]
+    good_daily_long = daily["trend"] == "bull"
+    good_4h_long = fourh["trend"] == "bull"
+    good_hour_long = hourly["trend"] == "bull" and hourly["macd"]["hist"] > 0
+
+    good_weekly_short = weekly["trend"] in ["bear", "neutral"] and weekly["price"] <= weekly["ema100"]
+    good_daily_short = daily["trend"] == "bear"
+    good_4h_short = fourh["trend"] == "bear"
+    good_hour_short = hourly["trend"] == "bear" and hourly["macd"]["hist"] < 0
+
+    long_confidence = 0.0
+    short_confidence = 0.0
+    long_reasons: List[str] = []
+    short_reasons: List[str] = []
+
+    if good_weekly_long:
+        long_confidence += 0.18
+        long_reasons.append("1W bullish/neutral")
+    if good_daily_long:
+        long_confidence += 0.20
+        long_reasons.append("1D bullish")
+    if good_4h_long:
+        long_confidence += 0.20
+        long_reasons.append("4H bullish")
+    if good_hour_long:
+        long_confidence += 0.18
+        long_reasons.append("1H confirmación bullish")
+    if hourly["adx"] >= ADX_THRESHOLD:
+        long_confidence += 0.12
+        long_reasons.append("ADX fuerte")
+    if hourly["volume_ratio"] >= VOLUME_HEALTH_MIN:
+        long_confidence += 0.12
+        long_reasons.append("Volumen saludable")
+
+    if good_weekly_short:
+        short_confidence += 0.18
+        short_reasons.append("1W bearish/neutral")
+    if good_daily_short:
+        short_confidence += 0.20
+        short_reasons.append("1D bearish")
+    if good_4h_short:
+        short_confidence += 0.20
+        short_reasons.append("4H bearish")
+    if good_hour_short:
+        short_confidence += 0.18
+        short_reasons.append("1H confirmación bearish")
+    if hourly["adx"] >= ADX_THRESHOLD:
+        short_confidence += 0.12
+        short_reasons.append("ADX fuerte")
+    if hourly["volume_ratio"] >= VOLUME_HEALTH_MIN:
+        short_confidence += 0.12
+        short_reasons.append("Volumen saludable")
+
+    atr_value = abs(hourly["price"] - hourly["ema21"])
+    if atr_value <= 0:
+        atr_value = abs(hourly["price"] - hourly["ema50"])
+
+    if long_confidence >= MIN_CONFIDENCE and ai_quality_filter(hourly):
+        return {
+            "signal": "LONG",
+            "confidence": long_confidence,
+            "reason": ", ".join(long_reasons),
+            "price": hourly["price"],
+            "atr": atr_value,
+        }
+    if short_confidence >= MIN_CONFIDENCE and ai_quality_filter(hourly):
+        return {
+            "signal": "SHORT",
+            "confidence": short_confidence,
+            "reason": ", ".join(short_reasons),
+            "price": hourly["price"],
+            "atr": atr_value,
+        }
+
+    return {"signal": "WAIT", "confidence": 0.0, "reason": "No se cumplen condiciones multi-timeframe.", "price": hourly["price"], "atr": 0.0}
+
+
+def analyze_market() -> Dict[str, Any]:
+    candles_1w = get_timeframe_candles("1W", CANDLE_LIMITS["1W"])
+    candles_1d = get_timeframe_candles("1D", CANDLE_LIMITS["1D"])
+    candles_4h = get_timeframe_candles("4H", CANDLE_LIMITS["4H"])
+    candles_1h = get_timeframe_candles("1H", CANDLE_LIMITS["1H"])
+
+    if any(len(c) < 60 for c in [candles_1w, candles_1d, candles_4h, candles_1h]):
+        return {"signal": "WAIT", "confidence": 0.0, "price": 0.0, "atr": 0.0, "reason": "No hay suficientes velas en todas las temporalidades."}
+
+    weekly = timeframe_analysis(candles_1w, "1W")
+    daily = timeframe_analysis(candles_1d, "1D")
+    fourh = timeframe_analysis(candles_4h, "4H")
+    hourly = timeframe_analysis(candles_1h, "1H")
+
+    signal = build_signal(weekly, daily, fourh, hourly)
+    signal.update({"weekly": weekly, "daily": daily, "fourh": fourh, "hourly": hourly})
+    return signal
+
+
+# =========================
+# GESTIÓN DEL RIESGO
+# =========================
+
+def can_trade_now() -> bool:
+    if not state.active or state.position_open:
+        return False
+    if state.last_trade_ts == 0:
+        return True
+    return (time.time() - state.last_trade_ts) >= MIN_MINUTES_BETWEEN_TRADES * 60
+
+
+def reset_daily_balance_if_needed(balance: float):
+    today = date.today().isoformat()
+    if state.day != today:
+        state.day = today
+        state.starting_day_balance = balance
+        logger.info("Nuevo día. Balance inicial: %.2f", balance)
+
+
+def daily_loss_limit_reached(balance: float) -> bool:
+    if state.starting_day_balance <= 0:
+        return False
+    drawdown = (state.starting_day_balance - balance) / state.starting_day_balance
+    return drawdown >= MAX_DAILY_LOSS
+
+
+def calculate_position_size(balance: float, price: float, atr_val: float) -> float:
+    if atr_val <= 0 or price <= 0:
+        return 0.0
+    risk_amount = balance * MAX_RISK_PER_TRADE
+    stop_distance = atr_val * 1.5
+    if stop_distance <= 0:
+        return 0.0
+    btc_size = risk_amount / stop_distance
+    usd_size = btc_size * price
+    usd_size = min(usd_size, balance * MAX_POSITION_BALANCE_PCT)
+    if usd_size < MIN_ORDER_USD:
+        return 0.0
+    return usd_size / price
+
+
+def record_trade_pnl(exit_price: float):
+    pnl = (exit_price - state.entry_price) * state.position_size_btc if state.side == "LONG" else (state.entry_price - exit_price) * state.position_size_btc
+    s = state.stats
+    s.total_trades += 1
+    if pnl >= 0:
+        s.wins += 1
+    else:
+        s.losses += 1
+    s.simulated_pnl_usd += pnl
+    s.best_trade = max(s.best_trade, pnl)
+    s.worst_trade = min(s.worst_trade, pnl)
+
+
+def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
+    state.highest_price = max(state.highest_price, price)
+    if state.side == "LONG":
+        if price <= state.stop_loss:
+            return "STOP_LOSS"
+        if price >= state.take_profit:
+            return "TAKE_PROFIT"
+        if hourly["adx"] >= ADX_THRESHOLD:
+            trailing_stop = state.highest_price - (hourly["price"] * 0.01)
+            state.stop_loss = max(state.stop_loss, trailing_stop)
+    elif state.side == "SHORT":
+        if price >= state.stop_loss:
+            return "STOP_LOSS"
+        if price <= state.take_profit:
+            return "TAKE_PROFIT"
+        if hourly["adx"] >= ADX_THRESHOLD:
+            trailing_stop = state.highest_price + (hourly["price"] * 0.01)
+            state.stop_loss = min(state.stop_loss, trailing_stop)
+    return None
+
 
 # =========================
 # TELEGRAM
 # =========================
 
 async def send_telegram(app: Optional[Application], message: str):
-    if not TELEGRAM_TOKEN or not CHAT_ID: 
+    if not TELEGRAM_TOKEN or not CHAT_ID:
         logger.info("Telegram no configurado: %s", message)
         return
     try:
@@ -249,48 +526,46 @@ async def send_telegram(app: Optional[Application], message: str):
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state.active = True
     save_state()
-    
-    await update.message.reply_text(
-        "✅ BTC Bot Seguro activo.\n\n"
-        "Comandos:\n"
-        "/status - Ver estado\n"
-        "/pause - Pausar bot\n"
-        "/start - Activar bot\n"
-        "/dryrun - Ver si opera real o simulación\n"
-        "/stats - Ver estadísticas\n"
-        "/signal - Ver última señal\n"
-        "/config - Ver configuración"
-    )
+    await update.message.reply_text("✅ BTC Bot Seguro activo.")
+
+
+async def pause_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state.active = False
+    save_state()
+    await update.message.reply_text("⏸ Bot pausado. No abrirá nuevas operaciones.")
 
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    s = state.stats
+    win_rate = (s.wins / s.total_trades * 100) if s.total_trades else 0
     await update.message.reply_text(
         "📊 Estado del bot\n"
         f"Activo: {state.active}\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"Producto: {PRODUCT_ID}\n"
         f"Posición abierta: {state.position_open}\n"
+        f"Side: {state.side}\n"
         f"Entrada: {state.entry_price:.2f}\n"
         f"BTC: {state.position_size_btc:.8f}\n"
         f"Stop Loss: {state.stop_loss:.2f}\n"
         f"Take Profit: {state.take_profit:.2f}\n"
-        f"Riesgo por trade: {MAX_RISK_PER_TRADE*100:.2f}%\n"
-        f"Límite pérdida diaria: {MAX_DAILY_LOSS*100:.2f}%"
+        f"Trades día: {s.total_trades}\n"
+        f"Win rate: {win_rate:.2f}%"
     )
 
 
-async def pause_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state.active = False
-    save_state()
-    
-    await update.message.reply_text("⏸ Bot pausado. No abrirá nuevas operaciones.")
-
-
-async def dryrun_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if DRY_RUN:
-        await update.message.reply_text("🧪 DRY_RUN=True. El bot está en simulación y NO opera dinero real.")
-    else:
-        await update.message.reply_text("⚠️ DRY_RUN=False. El bot puede operar con dinero REAL.")
+async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "⚙️ Configuración\n"
+        f"Producto: {PRODUCT_ID}\n"
+        f"DRY_RUN: {DRY_RUN}\n"
+        f"Riesgo por trade: {MAX_RISK_PER_TRADE*100:.2f}%\n"
+        f"Límite pérdida diaria: {MAX_DAILY_LOSS*100:.2f}%\n"
+        f"Confianza mínima: {MIN_CONFIDENCE:.2f}\n"
+        f"Min min entre trades: {MIN_MINUTES_BETWEEN_TRADES}\n"
+        f"Max trades por día: {MAX_TRADES_PER_DAY}\n"
+        f"ADX threshold: {ADX_THRESHOLD}\n"
+    )
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -317,398 +592,38 @@ async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "⚙️ Configuración\n"
-        f"Producto: {PRODUCT_ID}\n"
-        f"DRY_RUN: {DRY_RUN}\n"
-        f"Riesgo por trade: {MAX_RISK_PER_TRADE*100:.2f}%\n"
-        f"Límite pérdida diaria: {MAX_DAILY_LOSS*100:.2f}%\n"
-        f"Confianza mínima: {MIN_CONFIDENCE:.2f}\n"
-        f"Tiempo mínimo entre trades: {MIN_MINUTES_BETWEEN_TRADES} minutos\n"
-        f"Stop ATR: {STOP_LOSS_ATR_MULTIPLIER}\n"
-        f"Take Profit ATR: {TAKE_PROFIT_ATR_MULTIPLIER}\n"
-        f"Trailing Stop ATR: {TRAILING_STOP_ATR_MULTIPLIER}"
-    )
-
-
 # =========================
-# COINBASE FUNCTIONS
+# BUCLE PRINCIPAL
 # =========================
-
-def get_candles(granularity: str = "ONE_HOUR", limit: int = 180) -> List[Dict[str, Any]]:
-    end = int(time.time())
-    start = end - (limit * 3600)
-
-    cb = get_client()
-    response = cb.get_candles(
-        product_id=PRODUCT_ID,
-        start=str(start),
-        end=str(end),
-        granularity=granularity
-    )
-
-    candles = getattr(response, "candles", None)
-    if candles is None and isinstance(response, dict):
-        candles = response.get("candles", [])
-
-    result = []
-    for c in candles:
-        if isinstance(c, dict):
-            result.append(c)
-        else:
-            result.append({
-                "start": getattr(c, "start", 0),
-                "low": getattr(c, "low", 0),
-                "high": getattr(c, "high", 0),
-                "open": getattr(c, "open", 0),
-                "close": getattr(c, "close", 0),
-                "volume": getattr(c, "volume", 0),
-            })
-
-    return sorted(result, key=lambda x: int(x.get("start", 0)))
-
-
-def get_usdc_balance() -> float:
-    if DRY_RUN:
-        return DRY_RUN_BALANCE
-
-    cb = get_client()
-    response = cb.get_accounts()
-
-    accounts = getattr(response, "accounts", None)
-    if accounts is None and isinstance(response, dict):
-        accounts = response.get("accounts", [])
-
-    for account in accounts:
-        if isinstance(account, dict):
-            currency = account.get("currency")
-            available = account.get("available_balance", {}).get("value", 0)
-        else:
-            currency = getattr(account, "currency", "")
-            available_balance = getattr(account, "available_balance", None)
-            available = getattr(available_balance, "value", 0) if available_balance else 0
-
-        if currency == "USDC":
-            return float(available)
-
-    return 0.0
-
-
-def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None):
-    if DRY_RUN:
-        logger.info("[DRY_RUN] Orden simulada: side=%s quote=%s base=%s", side, quote_size, base_size)
-        return {"dry_run": True}
-
-    cb = get_client()
-    client_order_id = f"btc-bot-{int(time.time())}"
-
-    if side.upper() == "BUY":
-        return cb.market_order_buy(
-            client_order_id=client_order_id,
-            product_id=PRODUCT_ID,
-            quote_size=str(round(float(quote_size), 2))
-        )
-
-    return cb.market_order_sell(
-        client_order_id=client_order_id,
-        product_id=PRODUCT_ID,
-        base_size=str(round(float(base_size), 8))
-    )
-
-
-# =========================
-# INDICADORES
-# =========================
-
-def ema(values: List[float], period: int) -> float:
-    if not values:
-        return 0.0
-    k = 2 / (period + 1)
-    e = values[0]
-    for price in values[1:]:
-        e = price * k + e * (1 - k)
-    return e
-
-
-def rsi(values: List[float], period: int = 14) -> float:
-    if len(values) < period + 1:
-        return 50.0
-
-    gains, losses = [], []
-    for i in range(-period, 0):
-        change = values[i] - values[i - 1]
-        gains.append(max(change, 0))
-        losses.append(abs(min(change, 0)))
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    if avg_loss == 0:
-        return 100.0
-
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
-def macd(values: List[float]) -> Dict[str, float]:
-    macd_line = ema(values, 12) - ema(values, 26)
-    macd_series = []
-
-    for i in range(35, len(values) + 1):
-        sub = values[:i]
-        macd_series.append(ema(sub, 12) - ema(sub, 26))
-
-    signal = ema(macd_series[-9:], 9) if len(macd_series) >= 9 else macd_line
-    return {"macd": macd_line, "signal": signal, "hist": macd_line - signal}
-
-
-def bollinger(values: List[float], period: int = 20, mult: float = 2.0) -> Dict[str, float]:
-    recent = values[-period:] if len(values) >= period else values
-    mid = sum(recent) / len(recent)
-    variance = sum((x - mid) ** 2 for x in recent) / len(recent)
-    std = math.sqrt(variance)
-    width_pct = ((2 * mult * std) / mid * 100) if mid else 0
-    return {"upper": mid + mult * std, "middle": mid, "lower": mid - mult * std, "width_pct": width_pct}
-
-
-def atr(candles: List[Dict[str, Any]], period: int = 14) -> float:
-    if len(candles) < period + 1:
-        return 0.0
-
-    trs = []
-    for i in range(1, len(candles)):
-        high = float(candles[i]["high"])
-        low = float(candles[i]["low"])
-        prev_close = float(candles[i - 1]["close"])
-        trs.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
-
-    return sum(trs[-period:]) / period
-
-
-def volume_ratio(candles: List[Dict[str, Any]], period: int = 20) -> float:
-    volumes = [float(c.get("volume", 0)) for c in candles]
-    if len(volumes) < period + 1:
-        return 1.0
-    avg = sum(volumes[-period-1:-1]) / period
-    return volumes[-1] / avg if avg else 1.0
-
-
-# =========================
-# ESTRATEGIA
-# =========================
-
-def analyze_market(
-    candles_1h: List[Dict[str, Any]],
-    candles_4h: List[Dict[str, Any]],
-    candles_1d: List[Dict[str, Any]]
-) -> Dict[str, Any]:
-    # Verificar que haya suficientes velas en cada marco
-    if (
-        len(candles_1h) < 60 or
-        len(candles_4h) < 60 or
-        len(candles_1d) < 60
-    ):
-        return {
-            "signal": "WAIT",
-            "confidence": 0.0,
-            "price": 0.0,
-            "atr": 0.0,
-            "reason": "No hay suficientes velas.",
-        }
-
-    closes_1h = [float(c["close"]) for c in candles_1h]
-    closes_4h = [float(c["close"]) for c in candles_4h]
-    closes_1d = [float(c["close"]) for c in candles_1d]
-
-    closes = closes_1h
-    price = closes[-1]
-
-    rsi_val = rsi(closes)
-    macd_val = macd(closes)
-    bb = bollinger(closes)
-    atr_val = atr(candles_1h)
-    vol_ratio = volume_ratio(candles_1h)
-
-    ema21 = ema(closes[-60:], 21)
-    ema50 = ema(closes[-100:], 50)
-    ema100 = ema(closes[-160:], 100)
-
-    checks = [
-        (price > ema21 > ema50, 0.24, "EMA21 > EMA50 y precio encima"),
-        (price > ema100, 0.18, "precio encima de EMA100"),
-        (macd_val["macd"] > macd_val["signal"] and macd_val["hist"] > 0, 0.20, "MACD positivo"),
-        (45 <= rsi_val <= 66, 0.16, "RSI saludable"),
-        (price < bb["upper"], 0.10, "precio no está extremo"),
-        (bb["width_pct"] >= 0.45, 0.07, "mercado no está tan lateral"),
-        (vol_ratio >= 0.75, 0.05, "volumen aceptable"),
-    ]
-
-    score = 0.0
-    reasons: List[str] = []
-    for ok, points, reason in checks:
-        if ok:
-            score += points
-            reasons.append(reason)
-
-    signal = "BUY" if score >= MIN_CONFIDENCE else "WAIT"
-
-    return {
-        "signal": signal,
-        "confidence": score,
-        "price": price,
-        "rsi": rsi_val,
-        "macd": macd_val,
-        "bollinger": bb,
-        "atr": atr_val,
-        "ema21": ema21,
-        "ema50": ema50,
-        "ema100": ema100,
-        "volume_ratio": vol_ratio,
-        "reason": ", ".join(reasons) if reasons else "Sin confirmaciones suficientes.",
-    }
-
-
-def can_trade_now() -> bool:
-    if not state.active or state.position_open:
-        return False
-    return (time.time() - state.last_trade_ts) >= MIN_MINUTES_BETWEEN_TRADES * 60
-
-
-def reset_daily_balance_if_needed(balance: float):
-    today = date.today().isoformat()
-    if state.day != today:
-        state.day = today
-        state.starting_day_balance = balance
-        logger.info("Nuevo día. Balance inicial: %.2f", balance)
-
-
-def daily_loss_limit_reached(balance: float) -> bool:
-    if state.starting_day_balance <= 0:
-        return False
-    drawdown = (state.starting_day_balance - balance) / state.starting_day_balance
-    return drawdown >= MAX_DAILY_LOSS
-
-
-def calculate_position_size(balance: float, price: float, atr_val: float) -> float:
-    if atr_val <= 0 or price <= 0:
-        return 0.0
-
-    risk_amount = balance * MAX_RISK_PER_TRADE
-    stop_distance = atr_val * STOP_LOSS_ATR_MULTIPLIER
-
-    btc_size = risk_amount / stop_distance
-    usd_size = btc_size * price
-    usd_size = min(usd_size, balance * MAX_POSITION_BALANCE_PCT)
-
-    if usd_size < MIN_ORDER_USD:
-        return 0.0
-
-    return usd_size / price
-
-
-def record_trade_pnl(exit_price: float):
-    pnl = (exit_price - state.entry_price) * state.position_size_btc
-    s = state.stats
-    s.total_trades += 1
-    if pnl >= 0:
-        s.wins += 1
-    else:
-        s.losses += 1
-    s.simulated_pnl_usd += pnl
-    s.best_trade = max(s.best_trade, pnl)
-    s.worst_trade = min(s.worst_trade, pnl)
-
-
-def manage_open_position(price: float, atr_val: float) -> Optional[str]:
-    state.highest_price = max(state.highest_price, price)
-
-    initial_risk = state.entry_price - state.initial_stop_loss
-    if initial_risk > 0 and price >= state.entry_price + (initial_risk * BREAK_EVEN_TRIGGER_R):
-        state.stop_loss = max(state.stop_loss, state.entry_price)
-
-    if atr_val > 0:
-        trailing_stop = state.highest_price - (atr_val * TRAILING_STOP_ATR_MULTIPLIER)
-        state.stop_loss = max(state.stop_loss, trailing_stop)
-
-    if price <= state.stop_loss:
-        return "STOP_LOSS"
-
-    if price >= state.take_profit:
-        return "TAKE_PROFIT"
-
-    return None
-
 
 async def trading_loop(app: Application):
-    await send_telegram(
-        app,
-        f"🚀 BTC Bot Seguro Avanzado iniciado.\n"
-        f"DRY_RUN: {DRY_RUN}\n"
-        f"Producto: {PRODUCT_ID}\n"
-        f"Riesgo: {MAX_RISK_PER_TRADE*100:.2f}%"
-    )
-
+    await send_telegram(app, f"🚀 BTC Bot Seguro Avanzado iniciado. DRY_RUN: {DRY_RUN} Producto: {PRODUCT_ID}")
     while True:
         try:
-            candles_1h = get_candles(granularity="ONE_HOUR", limit=180)
-            candles_4h = get_candles(granularity="FOUR_HOUR", limit=180)
-            candles_1d = get_candles(granularity="ONE_DAY", limit=180)
-
-            analysis = analyze_market(candles_1h, candles_4h, candles_1d)
-
+            analysis = analyze_market()
             price = analysis.get("price", 0.0)
             balance = get_usdc_balance()
-
             reset_daily_balance_if_needed(balance)
-
-            state.last_signal = analysis.get("signal", "WAIT")
-            state.last_confidence = analysis.get("confidence", 0.0)
-            state.last_reason = analysis.get("reason", "")
-
+            state.last_signal = analysis["signal"]
+            state.last_confidence = analysis["confidence"]
+            state.last_reason = analysis["reason"]
             if daily_loss_limit_reached(balance):
                 state.active = False
                 save_state()
                 await send_telegram(app, "🛑 Bot pausado: límite de pérdida diaria alcanzado.")
                 await asyncio.sleep(ANALYZE_EVERY_SECONDS)
                 continue
-
-            logger.info(
-                "Precio %.2f | Señal %s | Confianza %.2f | %s",
-                price,
-                analysis.get("signal"),
-                analysis.get("confidence"),
-                state.last_reason,
-            )
-
+            logger.info("Precio %.2f | Señal %s | Confianza %.2f | %s", price, analysis["signal"], analysis["confidence"], state.last_reason)
             if state.position_open:
-                exit_reason = manage_open_position(price, analysis.get("atr", 0.0))
-
+                exit_reason = manage_open_position(price, analysis["hourly"])
                 if exit_reason:
-                    place_market_order("SELL", base_size=state.position_size_btc)
+                    place_market_order("SELL" if state.side == "LONG" else "BUY", base_size=state.position_size_btc if state.side == "LONG" else None, quote_size=None if state.side == "LONG" else state.position_usd)
                     record_trade_pnl(price)
-
-                    pnl = (price - state.entry_price) * state.position_size_btc
-
-                    win_rate = (
-                        (state.stats.wins / state.stats.total_trades) * 100
-                        if state.stats.total_trades > 0
-                        else 0
-                    )
-
-                    await send_telegram(
-                        app,
-                        f"{('🟢' if pnl >= 0 else '🔴')} Trade {('ganado' if pnl >= 0 else 'perdido')}\n"
-                        f"Resultado: ${pnl:.2f}\n"
-                        f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
-                        f"Win Rate: {win_rate:.2f}%\n"
-                        f"Salida: {exit_reason}\n"
-                        f"Precio salida: {price:.2f}\n"
-                        f"Entrada: {state.entry_price:.2f}\n"
-                        f"BTC: {state.position_size_btc:.8f}"
-                    )
-
+                    pnl = (price - state.entry_price) * state.position_size_btc if state.side == "LONG" else (state.entry_price - price) * state.position_size_btc
+                    win_rate = (state.stats.wins / state.stats.total_trades * 100) if state.stats.total_trades else 0
+                    await send_telegram(app, f"{('🟢' if pnl >= 0 else '🔴')} Trade {('ganado' if pnl >= 0 else 'perdido')}\nResultado: ${pnl:.2f}\nPnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\nWin Rate: {win_rate:.2f}%\nSalida: {exit_reason}\nPrecio salida: {price:.2f}\nEntrada: {state.entry_price:.2f}\nBTC: {state.position_size_btc:.8f}")
                     state.position_open = False
+                    state.side = None
                     state.entry_price = 0.0
                     state.position_size_btc = 0.0
                     state.position_usd = 0.0
@@ -718,44 +633,36 @@ async def trading_loop(app: Application):
                     state.highest_price = 0.0
                     state.last_trade_ts = time.time()
                     save_state()
-
-            elif can_trade_now() and analysis.get("signal") == "BUY":
-                btc_size = calculate_position_size(balance, price, analysis.get("atr", 0.0))
-                usd_size = btc_size * price
-
-                if usd_size >= MIN_ORDER_USD:
-                    stop = price - (analysis.get("atr", 0.0) * STOP_LOSS_ATR_MULTIPLIER)
-                    take = price + (analysis.get("atr", 0.0) * TAKE_PROFIT_ATR_MULTIPLIER)
-
-                    place_market_order("BUY", quote_size=usd_size)
-
-                    state.position_open = True
-                    state.entry_price = price
-                    state.position_size_btc = btc_size
-                    state.position_usd = usd_size
-                    state.stop_loss = stop
-                    state.initial_stop_loss = stop
-                    state.take_profit = take
-                    state.highest_price = price
-                    state.last_trade_ts = time.time()
-                    save_state()
-
-                    await send_telegram(
-                        app,
-                        f"🟢 Compra {('simulada' if DRY_RUN else 'real')}\n"
-                        f"Precio: {price:.2f}\n"
-                        f"USD: {usd_size:.2f}\n"
-                        f"BTC: {btc_size:.8f}\n"
-                        f"Stop: {stop:.2f}\n"
-                        f"Take Profit: {take:.2f}\n"
-                        f"Confianza: {analysis.get('confidence', 0.0):.2f}\n"
-                        f"Razón: {analysis.get('reason', '')}"
-                    )
-
+            elif can_trade_now() and analysis["signal"] in ["LONG", "SHORT"]:
+                if state.stats.total_trades >= MAX_TRADES_PER_DAY:
+                    logger.info("Máximo trades por día alcanzado: %s", state.stats.total_trades)
+                else:
+                    atr_estimate = abs(analysis["hourly"]["price"] - analysis["hourly"]["ema21"])
+                    btc_size = calculate_position_size(balance, price, atr_estimate)
+                    usd_size = btc_size * price
+                    if usd_size >= MIN_ORDER_USD:
+                        if analysis["signal"] == "LONG":
+                            stop = price - atr_estimate * 1.5
+                            take = price + atr_estimate * 3.0
+                        else:
+                            stop = price + atr_estimate * 1.5
+                            take = price - atr_estimate * 3.0
+                        place_market_order("BUY" if analysis["signal"] == "LONG" else "SELL", quote_size=usd_size if analysis["signal"] == "LONG" else None, base_size=None if analysis["signal"] == "LONG" else btc_size)
+                        state.position_open = True
+                        state.side = analysis["signal"]
+                        state.entry_price = price
+                        state.position_size_btc = btc_size
+                        state.position_usd = usd_size
+                        state.stop_loss = stop
+                        state.initial_stop_loss = stop
+                        state.take_profit = take
+                        state.highest_price = price
+                        state.last_trade_ts = time.time()
+                        save_state()
+                        await send_telegram(app, f"🟢 {'Compra' if analysis['signal'] == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\nPrecio: {price:.2f}\nUSD: {usd_size:.2f}\nBTC: {btc_size:.8f}\nStop: {stop:.2f}\nTake Profit: {take:.2f}\nConfianza: {analysis['confidence']:.2f}\nRazón: {analysis['reason']}")
         except Exception as e:
             logger.exception("Error en loop principal")
             await send_telegram(app, f"⚠️ Error en bot:\n{str(e)[:900]}")
-
         await asyncio.sleep(ANALYZE_EVERY_SECONDS)
 
 
@@ -764,33 +671,22 @@ async def post_init(app: Application):
 
 
 def validate_config():
-    if not TELEGRAM_TOKEN:
-        raise RuntimeError("Falta TELEGRAM_TOKEN.")
-    if not CHAT_ID:
-        raise RuntimeError("Falta CHAT_ID.")
-    if not CB_API_KEY:
-        raise RuntimeError("Falta CB_API_KEY.")
-    if not CB_API_SECRET:
-        raise RuntimeError("Falta CB_API_SECRET.")
+    if not CB_API_KEY or not CB_API_SECRET:
+        raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET.")
 
 
 def main():
     validate_config()
     load_state()
     get_client()
-
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-
     app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("pause", pause_cmd))
-    app.add_handler(CommandHandler("dryrun", dryrun_cmd))
+    app.add_handler(CommandHandler("status", status_cmd))
+    app.add_handler(CommandHandler("config", config_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("signal", signal_cmd))
-    app.add_handler(CommandHandler("config", config_cmd))
-    app.add_handler(CommandHandler("resume", start_cmd))
-
-    logger.info("Iniciando BTC Bot Seguro Avanzado con RESTClient...")
+    logger.info("Iniciando BTC Bot Seguro Avanzado...")
     app.run_polling()
 
 
