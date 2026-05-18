@@ -539,8 +539,7 @@ def analyze_market(
     ]
 
    score = 0.0
-   reasons = []
-
+   reasons =[]
    for ok, points, reason in  cheks:
        if ok:
           score += points
