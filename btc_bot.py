@@ -510,12 +510,12 @@ def analyze_market(
     ):
         return {"signal": "WAIT", "confidence": 0.0, "price": 0.0, "atr": 0.0, "reason": "No hay suficientes velas."}
 
-    closes_1h = [float(c["close"]) for c in candles_1h]
-    closes_4h = [float(c["close"]) for c in candles_4h]
-    closes_1d = [float(c["close"]) for c in candles_1d]
+        closes_1h = [float(c["close"]) for c in candles_1h]
+        closes_4h = [float(c["close"]) for c in candles_4h]
+        closes_1d = [float(c["close"]) for c in candles_1d]
 
-    closes = closes_1h
-    price = closes[-1]
+        closes = closes_1h
+        price = closes[-1]
 
     rsi_val = rsi(closes)
     macd_val = macd(closes)
