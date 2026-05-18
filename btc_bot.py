@@ -622,9 +622,11 @@ async def send_telegram(app: Optional[Application], message: str):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         logger.info("Telegram no configurado: %s", message)
         return
+    if app is None:
+        logger.info("Telegram no inicializado: %s", message)
+        return
     try:
-        if app:
-            await app.bot.send_message(chat_id=CHAT_ID, text=message)
+        await app.bot.send_message(chat_id=CHAT_ID, text=message)
     except Exception as e:
         logger.error("Error enviando Telegram: %s", e)
 
@@ -779,23 +781,40 @@ async def post_init(app: Application):
 
 
 def validate_config():
-    if not CB_API_KEY or not CB_API_SECRET:
+    if not DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
         raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET.")
+    if DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
+        logger.warning("DRY_RUN activo y faltan credenciales de Coinbase; no se ejecutarán órdenes reales.")
+    if TELEGRAM_TOKEN and not CHAT_ID:
+        logger.warning("CHAT_ID no configurado; Telegram deshabilitado.")
+    if CHAT_ID and not TELEGRAM_TOKEN:
+        logger.warning("TELEGRAM_TOKEN no configurado; Telegram deshabilitado.")
 
 
 def main():
     validate_config()
     load_state()
-    get_client()
-    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("pause", pause_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
-    app.add_handler(CommandHandler("config", config_cmd))
-    app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(CommandHandler("signal", signal_cmd))
-    logger.info("Iniciando BTC Bot Seguro Avanzado...")
-    app.run_polling()
+
+    if not DRY_RUN:
+        get_client()
+
+    use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID)
+    app: Optional[Application] = None
+    if use_telegram:
+        app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+        app.add_handler(CommandHandler("start", start_cmd))
+        app.add_handler(CommandHandler("pause", pause_cmd))
+        app.add_handler(CommandHandler("status", status_cmd))
+        app.add_handler(CommandHandler("config", config_cmd))
+        app.add_handler(CommandHandler("stats", stats_cmd))
+        app.add_handler(CommandHandler("signal", signal_cmd))
+
+    logger.info("Iniciando BTC Bot Seguro Avanzado... DRY_RUN=%s Telegram=%s", DRY_RUN, "habilitado" if use_telegram else "deshabilitado")
+
+    if use_telegram:
+        app.run_polling()
+    else:
+        asyncio.run(trading_loop(None))
 
 
 if __name__ == "__main__":
