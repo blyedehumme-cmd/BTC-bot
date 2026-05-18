@@ -62,8 +62,8 @@ TIMEFRAMES = {
 CANDLE_LIMITS = {
     "1H": 160,
     "4H": 120,
-    "1D": 100,
-    "1W": 80,
+    "1D": 140,
+    "1W": 120,
 }
 
 # =========================
@@ -109,6 +109,8 @@ class BotState:
     last_reason: str = "Sin análisis todavía."
     stats: TradeStats = field(default_factory=TradeStats)
     trade_history: List[Dict[str, Any]] = field(default_factory=list)
+    daily_trades: int = 0
+    lowest_price: float = 0.0
 
 state = BotState()
 
@@ -141,7 +143,36 @@ def load_state():
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-        state = BotState(**data)
+        stats_data = data.get("stats", {})
+        state = BotState(
+            active=bool(data.get("active", True)),
+            position_open=bool(data.get("position_open", False)),
+            side=data.get("side"),
+            entry_price=float(data.get("entry_price", 0.0)),
+            position_size_btc=float(data.get("position_size_btc", 0.0)),
+            position_usd=float(data.get("position_usd", 0.0)),
+            stop_loss=float(data.get("stop_loss", 0.0)),
+            initial_stop_loss=float(data.get("initial_stop_loss", 0.0)),
+            take_profit=float(data.get("take_profit", 0.0)),
+            highest_price=float(data.get("highest_price", 0.0)),
+            last_trade_ts=float(data.get("last_trade_ts", 0.0)),
+            day=str(data.get("day", "")),
+            starting_day_balance=float(data.get("starting_day_balance", 0.0)),
+            last_signal=str(data.get("last_signal", "WAIT")),
+            last_confidence=float(data.get("last_confidence", 0.0)),
+            last_reason=str(data.get("last_reason", "")),
+            stats=TradeStats(
+                total_trades=int(stats_data.get("total_trades", 0)),
+                wins=int(stats_data.get("wins", 0)),
+                losses=int(stats_data.get("losses", 0)),
+                simulated_pnl_usd=float(stats_data.get("simulated_pnl_usd", 0.0)),
+                best_trade=float(stats_data.get("best_trade", 0.0)),
+                worst_trade=float(stats_data.get("worst_trade", 0.0)),
+            ),
+            trade_history=data.get("trade_history", []),
+            daily_trades=int(data.get("daily_trades", 0)),
+            lowest_price=float(data.get("lowest_price", 0.0)),
+        )
         logger.info("Estado cargado correctamente.")
     except Exception as e:
         logger.error("Error cargando estado: %s", e)
@@ -449,6 +480,7 @@ def reset_daily_balance_if_needed(balance: float):
     if state.day != today:
         state.day = today
         state.starting_day_balance = balance
+        state.daily_trades = 0
         logger.info("Nuevo día. Balance inicial: %.2f", balance)
 
 
@@ -478,6 +510,7 @@ def record_trade_pnl(exit_price: float):
     pnl = (exit_price - state.entry_price) * state.position_size_btc if state.side == "LONG" else (state.entry_price - exit_price) * state.position_size_btc
     s = state.stats
     s.total_trades += 1
+    state.daily_trades += 1
     if pnl >= 0:
         s.wins += 1
     else:
@@ -485,11 +518,21 @@ def record_trade_pnl(exit_price: float):
     s.simulated_pnl_usd += pnl
     s.best_trade = max(s.best_trade, pnl)
     s.worst_trade = min(s.worst_trade, pnl)
+    state.trade_history.append({
+        "timestamp": int(time.time()),
+        "side": state.side,
+        "entry": state.entry_price,
+        "exit": exit_price,
+        "pnl": pnl,
+        "position_size_btc": state.position_size_btc,
+        "confidence": state.last_confidence,
+        "reason": state.last_reason,
+    })
 
 
 def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
-    state.highest_price = max(state.highest_price, price)
     if state.side == "LONG":
+        state.highest_price = max(state.highest_price, price)
         if price <= state.stop_loss:
             return "STOP_LOSS"
         if price >= state.take_profit:
@@ -498,12 +541,13 @@ def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
             trailing_stop = state.highest_price - (hourly["price"] * 0.01)
             state.stop_loss = max(state.stop_loss, trailing_stop)
     elif state.side == "SHORT":
+        state.lowest_price = min(state.lowest_price if state.lowest_price > 0 else price, price)
         if price >= state.stop_loss:
             return "STOP_LOSS"
         if price <= state.take_profit:
             return "TAKE_PROFIT"
         if hourly["adx"] >= ADX_THRESHOLD:
-            trailing_stop = state.highest_price + (hourly["price"] * 0.01)
+            trailing_stop = state.lowest_price + (hourly["price"] * 0.01)
             state.stop_loss = min(state.stop_loss, trailing_stop)
     return None
 
@@ -549,7 +593,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"BTC: {state.position_size_btc:.8f}\n"
         f"Stop Loss: {state.stop_loss:.2f}\n"
         f"Take Profit: {state.take_profit:.2f}\n"
-        f"Trades día: {s.total_trades}\n"
+        f"Trades día: {state.daily_trades}\n"
         f"Win rate: {win_rate:.2f}%"
     )
 
@@ -634,8 +678,8 @@ async def trading_loop(app: Application):
                     state.last_trade_ts = time.time()
                     save_state()
             elif can_trade_now() and analysis["signal"] in ["LONG", "SHORT"]:
-                if state.stats.total_trades >= MAX_TRADES_PER_DAY:
-                    logger.info("Máximo trades por día alcanzado: %s", state.stats.total_trades)
+                if state.daily_trades >= MAX_TRADES_PER_DAY:
+                    logger.info("Máximo trades por día alcanzado: %s", state.daily_trades)
                 else:
                     atr_estimate = abs(analysis["hourly"]["price"] - analysis["hourly"]["ema21"])
                     btc_size = calculate_position_size(balance, price, atr_estimate)
@@ -657,6 +701,7 @@ async def trading_loop(app: Application):
                         state.initial_stop_loss = stop
                         state.take_profit = take
                         state.highest_price = price
+                        state.lowest_price = price
                         state.last_trade_ts = time.time()
                         save_state()
                         await send_telegram(app, f"🟢 {'Compra' if analysis['signal'] == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\nPrecio: {price:.2f}\nUSD: {usd_size:.2f}\nBTC: {btc_size:.8f}\nStop: {stop:.2f}\nTake Profit: {take:.2f}\nConfianza: {analysis['confidence']:.2f}\nRazón: {analysis['reason']}")
