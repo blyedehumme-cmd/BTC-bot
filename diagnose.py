@@ -45,7 +45,9 @@ print('4H:', fourh)
 print('1H:', hourly)
 
 signal = btc.build_signal(weekly, daily, fourh, hourly)
+ai_eval = btc.ai_assist_analysis(weekly, daily, fourh, hourly)
 print('Señal construida:', signal)
+print('Evaluación IA:', ai_eval)
 
 balance = btc.get_usdc_balance()
 print('Balance USDC (DRY_RUN):', balance)

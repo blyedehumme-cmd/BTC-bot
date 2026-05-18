@@ -40,6 +40,7 @@ ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
+USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "true").lower().strip() == "true"
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
 
 EMA_FAST = 21
@@ -366,6 +367,45 @@ def ai_quality_filter(analysis: Dict[str, Any]) -> bool:
     return True
 
 
+def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
+    score = 0.0
+    reasons: List[str] = []
+
+    if hourly["adx"] >= ADX_THRESHOLD:
+        score += 0.25
+        reasons.append("ADX fuerte en 1H")
+    else:
+        reasons.append("ADX débil en 1H")
+
+    if hourly["volume_ratio"] >= VOLUME_HEALTH_MIN:
+        score += 0.20
+        reasons.append("Volumen saludable en 1H")
+    else:
+        reasons.append("Volumen bajo en 1H")
+
+    macd_hist = hourly["macd"]["hist"]
+    if abs(macd_hist) >= 0.05:
+        score += 0.15
+        reasons.append("Momentum MACD significativo en 1H")
+    else:
+        reasons.append("Momentum MACD débil en 1H")
+
+    if weekly["trend"] != "neutral":
+        score += 0.15
+        reasons.append(f"Tendencia 1W {weekly['trend']}")
+    else:
+        reasons.append("Tendencia 1W neutral")
+
+    if daily["trend"] != "neutral":
+        score += 0.15
+        reasons.append(f"Tendencia 1D {daily['trend']}")
+    else:
+        reasons.append("Tendencia 1D neutral")
+
+    allow = score >= 0.60
+    return {"allow": allow, "score": score, "reasons": reasons}
+
+
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
     good_weekly_long = weekly["trend"] in ["bull", "neutral"] and weekly["price"] >= weekly["ema100"]
     good_daily_long = daily["trend"] == "bull"
@@ -424,24 +464,46 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
     if atr_value <= 0:
         atr_value = abs(hourly["price"] - hourly["ema50"])
 
+    ai_evaluation = ai_assist_analysis(weekly, daily, fourh, hourly)
+    if USE_AI_ASSIST:
+        ai_reason = f"IA: {'|'.join(ai_evaluation['reasons'])}"
+    else:
+        ai_reason = "IA desactivada"
+
     if long_confidence >= MIN_CONFIDENCE and ai_quality_filter(hourly):
+        if USE_AI_ASSIST and not ai_evaluation["allow"]:
+            return {
+                "signal": "WAIT",
+                "confidence": long_confidence,
+                "reason": f"Faltó confirmación IA: {', '.join(ai_evaluation['reasons'])}",
+                "price": hourly["price"],
+                "atr": atr_value,
+            }
         return {
             "signal": "LONG",
             "confidence": long_confidence,
-            "reason": ", ".join(long_reasons),
+            "reason": ", ".join(long_reasons) + ". " + ai_reason,
             "price": hourly["price"],
             "atr": atr_value,
         }
     if short_confidence >= MIN_CONFIDENCE and ai_quality_filter(hourly):
+        if USE_AI_ASSIST and not ai_evaluation["allow"]:
+            return {
+                "signal": "WAIT",
+                "confidence": short_confidence,
+                "reason": f"Faltó confirmación IA: {', '.join(ai_evaluation['reasons'])}",
+                "price": hourly["price"],
+                "atr": atr_value,
+            }
         return {
             "signal": "SHORT",
             "confidence": short_confidence,
-            "reason": ", ".join(short_reasons),
+            "reason": ", ".join(short_reasons) + ". " + ai_reason,
             "price": hourly["price"],
             "atr": atr_value,
         }
 
-    return {"signal": "WAIT", "confidence": 0.0, "reason": "No se cumplen condiciones multi-timeframe.", "price": hourly["price"], "atr": 0.0}
+    return {"signal": "WAIT", "confidence": 0.0, "reason": f"No se cumplen condiciones multi-timeframe. {ai_reason}", "price": hourly["price"], "atr": 0.0}
 
 
 def analyze_market() -> Dict[str, Any]:
@@ -603,6 +665,7 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚙️ Configuración\n"
         f"Producto: {PRODUCT_ID}\n"
         f"DRY_RUN: {DRY_RUN}\n"
+        f"IA asistida: {USE_AI_ASSIST}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE*100:.2f}%\n"
         f"Límite pérdida diaria: {MAX_DAILY_LOSS*100:.2f}%\n"
         f"Confianza mínima: {MIN_CONFIDENCE:.2f}\n"
