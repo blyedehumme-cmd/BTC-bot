@@ -536,7 +536,7 @@ def analyze_market(
         (price < bb["upper"], 0.10, "precio no está extremo"),
         (bb["width_pct"] >= 0.45, 0.07, "mercado no está tan lateral"),
         (vol_ratio >= 0.75, 0.05, "volumen aceptable"),
-    ]
+  ]
 
   score = 0.0
   reasons = []
