@@ -538,13 +538,15 @@ def analyze_market(
         (vol_ratio >= 0.75, 0.05, "volumen aceptable"),
     ]
 
-   score = 0.0
-   reasons =[]
-   for ok, points, reason in  cheks:
-       if ok:
-          score += points
-          reasons.append(reason)
-   signal = "BUY" if score >= MIN_CONFIDENCE else "WAIT' 
+       score = 0.0
+    reasons = []
+
+    for ok, points, reason in checks:
+        if ok:
+            score += points
+            reasons.append(reason)
+
+    signal = "BUY" if score >= MIN_CONFIDENCE else "WAIT"
         
 
     return {
