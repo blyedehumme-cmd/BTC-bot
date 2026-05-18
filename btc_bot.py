@@ -517,15 +517,15 @@ def analyze_market(
         closes = closes_1h
         price = closes[-1]
 
-    rsi_val = rsi(closes)
-    macd_val = macd(closes)
-    bb = bollinger(closes)
-    atr_val = atr(candles_1h)
-    vol_ratio = volume_ratio(candles_1h)
+        rsi_val = rsi(closes)
+        macd_val = macd(closes)
+        bb = bollinger(closes)
+        atr_val = atr(candles_1h)
+        vol_ratio = volume_ratio(candles_1h)
 
-    ema21 = ema(closes[-60:], 21)
-    ema50 = ema(closes[-100:], 50)
-    ema100 = ema(closes[-160:], 100)
+        ema21 = ema(closes[-60:], 21)
+        ema50 = ema(closes[-100:], 50)
+        ema100 = ema(closes[-160:], 100)
 
     checks = [
         (price > ema21 > ema50, 0.24, "EMA21 > EMA50 y precio encima"),
