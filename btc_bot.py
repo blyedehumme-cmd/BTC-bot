@@ -538,7 +538,7 @@ def analyze_market(
         (vol_ratio >= 0.75, 0.05, "volumen aceptable"),
     ]
 
-       score = 0.0
+    score = 0.0
     reasons = []
 
     for ok, points, reason in checks:
