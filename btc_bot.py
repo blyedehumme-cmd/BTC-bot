@@ -498,18 +498,30 @@ def volume_ratio(candles: List[Dict[str, Any]], period: int = 20) -> float:
 # ESTRATEGIA
 # =========================
 
-def analyze_market(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if len(candles) < 60:
+def analyze_market(
+    candles_1h: List[Dict[str, Any]],
+    candles_4h: List[Dict[str, Any]],
+    candles_1d: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+       if (
+        len(candles_1h) < 60 or
+        len(candles_4h) < 60 or
+        len(candles_1d) < 60
+    ):
         return {"signal": "WAIT", "confidence": 0.0, "price": 0.0, "atr": 0.0, "reason": "No hay suficientes velas."}
 
-    closes = [float(c["close"]) for c in candles]
+    closes_1h = [float(c["close"]) for c in candles_1h]
+    closes_4h = [float(c["close"]) for c in candles_4h]
+    closes_1d = [float(c["close"]) for c in candles_1d]
+
+    closes = closes_1h
     price = closes[-1]
 
     rsi_val = rsi(closes)
     macd_val = macd(closes)
     bb = bollinger(closes)
-    atr_val = atr(candles)
-    vol_ratio = volume_ratio(candles)
+    atr_val = atr(candles_1h)
+    vol_ratio = volume_ratio(candles_1h)
 
     ema21 = ema(closes[-60:], 21)
     ema50 = ema(closes[-100:], 50)
@@ -632,8 +644,15 @@ async def trading_loop(app: Application):
 
     while True:
         try:
-            candles = get_candles(limit=180)
-            analysis = analyze_market(candles)
+              candles_1h = get_candles(granularity="ONE_HOUR", limit=180)
+              candles_4h = get_candles(granularity="FOUR_HOUR", limit=180)
+              candles_1d = get_candles(granularity="ONE_DAY", limit=180)
+
+    analysis = analyze_market(
+              candles_1h,
+              candles_4h,
+              candles_1d
+    )
 
             price = analysis.get("price", 0.0)
             balance = get_usdc_balance()
