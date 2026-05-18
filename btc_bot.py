@@ -542,8 +542,8 @@ def analyze_market(
         reasons = []
         for ok, points, reason in checks:
         if ok:
-            score += points
-            reasons.append(reason)
+        score += points
+        reasons.append(reason)
 
     signal = "BUY" if score >= MIN_CONFIDENCE else "WAIT"
 
