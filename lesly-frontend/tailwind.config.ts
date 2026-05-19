@@ -30,8 +30,8 @@ const config: Config = {
           '50%': { transform: 'translateY(-10px)' },
         },
         pulseGlow: {
-          '0%, 100%': { opacity: 0.88 },
-          '50%': { opacity: 1 },
+          '0%, 100%': { opacity: '0.88' },
+          '50%': { opacity: '1' },
         },
       },
     },
