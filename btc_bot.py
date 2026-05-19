@@ -608,14 +608,27 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    confidence = int(round(analysis.get("confidence", 0.0) * 100))
+    trend = analysis.get("hourly", {}).get("trend", "neutral")
+    direction = analysis.get("signal", "WAIT")
+    return {
+        "symbol": PRODUCT_ID,
+        "timeframe": "1H",
+        "direction": direction,
+        "confidence_score": max(0, min(confidence, 100)),
+        "risk_level": "high" if confidence >= 80 else "medium" if confidence >= 50 else "low",
+        "market_condition": trend,
+        "approved": direction in ["LONG", "SHORT"],
+        "explanation": analysis.get("reason", "No reason provided."),
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 async def send_signal_to_backend(analysis: Dict[str, Any]) -> None:
     if not BACKEND_API_URL:
         return
-    payload = {
-        "symbol": PRODUCT_ID,
-        "timeframe": "1H",
-        "direction": analysis.get("signal", "WAIT"),
-    }
+    payload = build_signal_payload(analysis)
     await post_json_to_backend("signals", payload)
 
 

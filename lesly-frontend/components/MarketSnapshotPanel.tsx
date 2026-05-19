@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 type MarketSnapshot = {
   symbol: string;
@@ -21,7 +22,7 @@ export default function MarketSnapshotPanel() {
   useEffect(() => {
     async function fetchSnapshots() {
       try {
-        const response = await fetch('http://localhost:8000/api/market/snapshots');
+        const response = await fetch(`${API_BASE_URL}/market/snapshots`);
         if (!response.ok) {
           throw new Error('Unable to fetch market snapshots');
         }

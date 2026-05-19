@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 type AiLog = {
   time: string;
@@ -17,7 +18,7 @@ export default function AiLogs() {
   useEffect(() => {
     async function fetchLogs() {
       try {
-        const response = await fetch('http://localhost:8000/api/logs');
+        const response = await fetch(`${API_BASE_URL}/logs`);
         if (!response.ok) {
           throw new Error('Could not load logs');
         }

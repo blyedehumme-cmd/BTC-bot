@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 type Performance = {
   total_signals: number;
@@ -19,7 +20,7 @@ export default function PerformancePanel() {
   useEffect(() => {
     async function fetchPerformance() {
       try {
-        const response = await fetch('http://localhost:8000/api/ai/performance');
+        const response = await fetch(`${API_BASE_URL}/ai/performance`);
         if (!response.ok) {
           throw new Error('Unable to fetch performance data');
         }

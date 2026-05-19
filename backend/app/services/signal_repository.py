@@ -18,12 +18,12 @@ async def create_signal(db: AsyncSession, payload: SignalCreate) -> Signal:
         symbol=payload.symbol,
         timeframe=payload.timeframe,
         direction=payload.direction,
-        confidence_score=0,
-        risk_level='Unknown',
-        market_condition='Pending',
-        approved=False,
-        explanation='Pending evaluation in paper trading mode.',
-        created_at=datetime.utcnow(),
+        confidence_score=payload.confidence_score,
+        risk_level=payload.risk_level,
+        market_condition=payload.market_condition,
+        approved=payload.approved,
+        explanation=payload.explanation,
+        created_at=payload.created_at or datetime.utcnow(),
     )
     db.add(signal)
     await db.commit()

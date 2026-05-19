@@ -9,7 +9,12 @@ class SignalBase(BaseModel):
 
 
 class SignalCreate(SignalBase):
-    pass
+    confidence_score: int = 0
+    risk_level: str = 'Unknown'
+    market_condition: str = 'Pending'
+    approved: bool = False
+    explanation: str = 'Pending evaluation in paper trading mode.'
+    created_at: datetime | None = None
 
 
 class SignalResponse(SignalBase):
@@ -21,8 +26,9 @@ class SignalResponse(SignalBase):
     explanation: str
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        'from_attributes': True,
+    }
 
 
 class AiLogResponse(BaseModel):

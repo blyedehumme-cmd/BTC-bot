@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 type Signal = {
   id: number;
@@ -23,7 +24,7 @@ export default function SignalBoard() {
   useEffect(() => {
     async function fetchSignals() {
       try {
-        const response = await fetch('http://localhost:8000/api/signals');
+        const response = await fetch(`${API_BASE_URL}/signals`);
         if (!response.ok) {
           throw new Error('Could not load signals');
         }
