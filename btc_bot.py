@@ -192,6 +192,41 @@ def get_client() -> RESTClient:
     return client
 
 
+def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
+    interval_seconds = {
+        "1H": 3600,
+        "4H": 14400,
+        "1D": 86400,
+        "1W": 604800,
+    }[timeframe]
+    base_price = 30000.0
+    step = {
+        "1H": 8.0,
+        "4H": 18.0,
+        "1D": 32.0,
+        "1W": 60.0,
+    }[timeframe]
+    result: List[Dict[str, Any]] = []
+    current_price = base_price
+    now = int(time.time())
+    for index in range(limit):
+        open_price = current_price
+        close_price = current_price + ((-1) ** index) * step * 0.25
+        high_price = max(open_price, close_price) + step * 0.15
+        low_price = min(open_price, close_price) - step * 0.15
+        volume = max(1.0, DRY_RUN_BALANCE / 1000.0 + (index % 10) * 5.0)
+        result.append({
+            "start": now - (limit - index) * interval_seconds,
+            "low": low_price,
+            "high": high_price,
+            "open": open_price,
+            "close": close_price,
+            "volume": volume,
+        })
+        current_price = close_price + ((-1) ** (index + 1)) * step * 0.08
+    return result
+
+
 def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
     granularity = TIMEFRAMES[timeframe]
     end_ts = int(time.time())
@@ -201,6 +236,10 @@ def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
         "1D": 86400,
         "1W": 604800,
     }[timeframe])
+    if DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
+        logger.info("DRY_RUN sin credenciales. Usando velas simuladas para %s.", timeframe)
+        return generate_mock_candles(timeframe, limit)
+
     cb = get_client()
     response = cb.get_candles(product_id=PRODUCT_ID, start=str(start_ts), end=str(end_ts), granularity=granularity)
     candles = getattr(response, "candles", None)
