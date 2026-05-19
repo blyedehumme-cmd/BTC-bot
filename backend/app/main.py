@@ -19,6 +19,13 @@ app.add_middleware(
 app.include_router(api_router, prefix='/api')
 
 
+@app.on_event('startup')
+async def on_startup():
+    from app.services.db_init import init_db
+
+    await init_db()
+
+
 @app.get('/')
 async def root():
     return {

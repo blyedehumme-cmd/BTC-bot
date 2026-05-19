@@ -48,3 +48,4 @@ python3 -c "from app.services.db_init import init_db; import asyncio; asyncio.ru
 - `GET /api/market/snapshots` — snapshots de mercado simulados
 - `GET /api/ai/status` — estado del motor AI y última decisión
 - `GET /api/ai/performance` — resumen de performance simulado
+- `POST /api/db/init` — crea las tablas de base de datos desde el modelo SQLAlchemy
