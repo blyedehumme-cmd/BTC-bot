@@ -29,12 +29,12 @@ export default function TradeHistoryPanel() {
       try {
         const response = await fetch(`${API_BASE_URL}/trades`);
         if (!response.ok) {
-          throw new Error('Unable to fetch trades');
+          throw new Error('Backend offline');
         }
         const data: Trade[] = await response.json();
         setTrades(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }

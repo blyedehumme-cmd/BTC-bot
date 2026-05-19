@@ -1,16 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 type AiStatus = {
-  engine: string;
-  paper_mode: boolean;
-  last_decision: string;
-  approved_signals: number;
-  rejected_signals: number;
-  risk_level: string;
-  explanation: string;
-  last_updated: string;
+  engine_status: string;
+  mode: string;
+  last_signal: string;
+  confidence: number;
+  last_analysis_time: string;
+  backend_connected: boolean;
 };
 
 export default function AiStatusPanel() {
@@ -21,14 +20,14 @@ export default function AiStatusPanel() {
   useEffect(() => {
     async function fetchStatus() {
       try {
-        const response = await fetch('http://localhost:8000/api/ai/status');
+        const response = await fetch(`${API_BASE_URL}/ai/status`);
         if (!response.ok) {
-          throw new Error('Unable to fetch AI status');
+          throw new Error('Backend offline');
         }
         const data: AiStatus = await response.json();
         setStatus(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }
@@ -53,33 +52,31 @@ export default function AiStatusPanel() {
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-3xl bg-[#07101d]/90 p-5">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Engine</p>
-                <p className="mt-2 text-xl font-semibold text-white">{status.engine}</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Engine Status</p>
+                <p className="mt-2 text-xl font-semibold text-white">{status.engine_status}</p>
               </div>
               <div className="rounded-3xl bg-[#07101d]/90 p-5">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Risk Level</p>
-                <p className="mt-2 text-xl font-semibold text-white">{status.risk_level}</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Mode</p>
+                <p className="mt-2 text-xl font-semibold text-white">{status.mode}</p>
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-3xl bg-[#07101d]/90 p-5 text-center">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Approved</p>
-                <p className="mt-2 text-2xl font-semibold text-glow">{status.approved_signals}</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Last Signal</p>
+                <p className="mt-2 text-2xl font-semibold text-glow">{status.last_signal}</p>
               </div>
               <div className="rounded-3xl bg-[#07101d]/90 p-5 text-center">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Rejected</p>
-                <p className="mt-2 text-2xl font-semibold text-rose-400">{status.rejected_signals}</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Confidence</p>
+                <p className="mt-2 text-2xl font-semibold text-green-400">{status.confidence}%</p>
               </div>
               <div className="rounded-3xl bg-[#07101d]/90 p-5 text-center">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Paper Mode</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{status.paper_mode ? 'Active' : 'Disabled'}</p>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Backend</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{status.backend_connected ? 'Connected' : 'Offline'}</p>
               </div>
             </div>
             <div className="rounded-3xl border border-slate-800 bg-[#091229]/90 p-5">
-              <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Last Decision</p>
-              <p className="mt-2 text-white">{status.last_decision}</p>
-              <p className="mt-3 text-sm text-slate-400">{status.explanation}</p>
-              <p className="mt-4 text-xs uppercase tracking-[0.24em] text-slate-500">Updated at {new Date(status.last_updated).toLocaleTimeString()}</p>
+              <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Last Analysis</p>
+              <p className="mt-2 text-white">{new Date(status.last_analysis_time).toLocaleString()}</p>
             </div>
           </div>
         )}

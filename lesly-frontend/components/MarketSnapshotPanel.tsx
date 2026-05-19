@@ -24,12 +24,12 @@ export default function MarketSnapshotPanel() {
       try {
         const response = await fetch(`${API_BASE_URL}/market/snapshots`);
         if (!response.ok) {
-          throw new Error('Unable to fetch market snapshots');
+          throw new Error('Backend offline');
         }
         const data: MarketSnapshot[] = await response.json();
         setSnapshots(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }

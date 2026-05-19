@@ -6,24 +6,20 @@ from app.models.models import Signal
 
 
 async def get_ai_status(db: AsyncSession) -> dict[str, object]:
-    total_signals = await db.scalar(select(func.count()).select_from(Signal)) or 0
-    approved_signals = await db.scalar(select(func.count()).select_from(Signal).where(Signal.approved.is_(True))) or 0
-    rejected_signals = total_signals - approved_signals
     latest_signal = await db.scalar(select(Signal).order_by(Signal.created_at.desc()).limit(1))
-    last_decision = 'No decisions yet.'
-    risk_level = 'Unknown'
-    explanation = 'Awaiting paper trading signal data.'
+    last_signal = 'No signal generated yet.'
+    confidence = 0
+    last_analysis_time = datetime.utcnow().isoformat() + 'Z'
     if latest_signal:
-        last_decision = f"{latest_signal.direction} signal"
-        risk_level = latest_signal.risk_level
-        explanation = latest_signal.explanation
+        last_signal = f"{latest_signal.direction} ({latest_signal.timeframe})"
+        confidence = latest_signal.confidence_score
+        last_analysis_time = latest_signal.created_at.isoformat() + 'Z'
+
     return {
-        'engine': 'Online',
-        'paper_mode': True,
-        'last_decision': last_decision,
-        'approved_signals': int(approved_signals),
-        'rejected_signals': int(rejected_signals),
-        'risk_level': risk_level,
-        'explanation': explanation,
-        'last_updated': datetime.utcnow().isoformat() + 'Z',
+        'engine_status': 'Online',
+        'mode': 'PAPER_TRADING',
+        'last_signal': last_signal,
+        'confidence': int(confidence),
+        'last_analysis_time': last_analysis_time,
+        'backend_connected': True,
     }

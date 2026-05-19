@@ -22,12 +22,12 @@ export default function PerformancePanel() {
       try {
         const response = await fetch(`${API_BASE_URL}/ai/performance`);
         if (!response.ok) {
-          throw new Error('Unable to fetch performance data');
+          throw new Error('Backend offline');
         }
         const data: Performance = await response.json();
         setPerformance(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }

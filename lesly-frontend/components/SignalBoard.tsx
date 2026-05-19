@@ -26,12 +26,12 @@ export default function SignalBoard() {
       try {
         const response = await fetch(`${API_BASE_URL}/signals`);
         if (!response.ok) {
-          throw new Error('Could not load signals');
+          throw new Error('Backend offline');
         }
         const data: Signal[] = await response.json();
         setSignals(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }

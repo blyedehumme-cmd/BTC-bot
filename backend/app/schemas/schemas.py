@@ -39,14 +39,12 @@ class AiLogResponse(BaseModel):
 
 
 class AiStatusResponse(BaseModel):
-    engine: str
-    paper_mode: bool
-    last_decision: str
-    approved_signals: int
-    rejected_signals: int
-    risk_level: str
-    explanation: str
-    last_updated: str
+    engine_status: str
+    mode: str
+    last_signal: str
+    confidence: int
+    last_analysis_time: str
+    backend_connected: bool
 
 
 class StrategyPerformanceResponse(BaseModel):
@@ -56,6 +54,19 @@ class StrategyPerformanceResponse(BaseModel):
     win_rate: int
     average_return: float
     max_drawdown: float
+
+
+class MarketLiveResponse(BaseModel):
+    symbol: str
+    price: float
+    change_1h_pct: float
+    signal: str
+    confidence: int
+    support: float
+    resistance: float
+    trend: str
+    updated_at: str
+    backend_connected: bool
 
 
 class PaperTradeBase(BaseModel):

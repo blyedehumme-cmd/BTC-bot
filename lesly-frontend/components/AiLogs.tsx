@@ -20,12 +20,12 @@ export default function AiLogs() {
       try {
         const response = await fetch(`${API_BASE_URL}/logs`);
         if (!response.ok) {
-          throw new Error('Could not load logs');
+          throw new Error('Backend offline');
         }
         const data: AiLog[] = await response.json();
         setLogs(data);
       } catch (err) {
-        setError((err as Error).message);
+        setError('Backend offline');
       } finally {
         setLoading(false);
       }
