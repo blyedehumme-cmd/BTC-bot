@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "rootDirectory": "lesly-frontend",
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_BACKEND_URL": "https://YOUR_BACKEND_HOST/api"
+    }
+  }
+}

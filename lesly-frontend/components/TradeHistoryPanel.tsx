@@ -74,7 +74,7 @@ export default function TradeHistoryPanel() {
               </div>
               <div className="rounded-3xl bg-[#06131f]/90 p-4">
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Return</p>
-                <p className={`mt-2 text-lg font-semibold ${trade.result_pct && trade.result_pct >= 0 ? 'text-green-400' : 'text-rose-400'}`}>
+                <p className={`mt-2 text-lg font-semibold ${trade.result_pct !== null && trade.result_pct >= 0 ? 'text-green-400' : 'text-rose-400'}`}>
                   {trade.result_pct !== null ? `${trade.result_pct.toFixed(2)}%` : '—'}
                 </p>
               </div>

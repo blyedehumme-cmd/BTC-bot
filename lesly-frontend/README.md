@@ -28,3 +28,11 @@ npm run dev
 
 - Paper-trading UI only. No real orders.
 - Built with Next.js, React and Tailwind CSS.
+
+## Deploy to Vercel
+
+1. Import this repository into Vercel.
+2. Use `lesly-frontend` as the project root or configure `rootDirectory: "lesly-frontend"`.
+3. Set the Vercel environment variable:
+   - `NEXT_PUBLIC_BACKEND_URL=https://<YOUR_BACKEND_HOST>/api`
+4. Deploy and open the generated public URL.

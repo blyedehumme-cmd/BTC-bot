@@ -62,3 +62,11 @@ python3 diagnose.py
 3. Backtesting profesional
 4. Paper trading y producción gradual
 5. Escalabilidad multiusuario
+
+## Frontend Deployment
+
+La interfaz de usuario del dashboard se encuentra en `lesly-frontend`. Para desplegarla en Vercel, usa la configuración de monorepo con `rootDirectory: "lesly-frontend"` y configura la variable de entorno pública:
+
+- `NEXT_PUBLIC_BACKEND_URL=https://<YOUR_BACKEND_HOST>/api`
+
+Esto asegura que el dashboard apunte al backend de la API desde el dominio público de Vercel.
