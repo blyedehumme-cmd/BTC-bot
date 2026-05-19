@@ -1,54 +1,24 @@
-# Lesly Backend (FastAPI)\n\nEstructura inicial para el backend de Lesly AI Trading.\n\n## Objetivo\n\nEsta carpeta contiene el scaffold de un backend en Python FastAPI diseñado para paper trading, análisis de señales y almacenamiento en PostgreSQL. Actualmente no ejecuta operaciones reales ni se conecta a Coinbase.\n\n## Ejecutar local\n\n1. Crear un entorno virtual:\n\n```bash\ncd backend\npython3 -m venv .venv\nsource .venv/bin/activate\n```
+# Lesly Backend
 
-2. Instalar dependencias:
+FastAPI API for the Lesly paper-trading dashboard. Signal logic lives in `../btc_bot.py`.
 
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-3. Correr el servidor de desarrollo:
+## Quick start
 
 ```bash
+cp .env.example .env
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Migraciones Alembic
+API docs: http://localhost:8000/docs
 
-1. Generar migración inicial:
-
-```bash
-cd backend
-alembic revision --autogenerate -m "initial schema"
-```
-
-2. Aplicar migración:
+## Tests
 
 ```bash
-alembic upgrade head
+pip install -r requirements.txt
+pytest
 ```
 
-Si no quieres usar Alembic todavía, puedes crear tablas directamente con:
+## Deployment
 
-```bash
-python3 -c "from app.services.db_init import init_db; import asyncio; asyncio.run(init_db())"
-```
-
-## Notas importantes
-
-- Modo paper trading solamente.
-- No hay lógica de ejecución real.
-- No se conecta a Coinbase todavía.
-
-## Endpoints disponibles
-
-- `GET /api/health` — estado de servicio y modo paper trading
-- `GET /api/signals` — señales simuladas de paper trading
-- `POST /api/signals` — crea una señal simulada con explicación
-- `GET /api/logs` — logs de decisiones de IA simulados
-- `GET /api/market/snapshots` — snapshots de mercado simulados
-- `POST /api/market/snapshots` — guarda un nuevo snapshot de mercado en la base de datos
-- `GET /api/ai/status` — estado del motor AI basado en datos de señales almacenadas
-- `GET /api/ai/performance` — resumen de performance calculado desde datos de paper trades
-- `GET /api/trades` — lista trades de paper trading persistidos
-- `POST /api/trades` — guarda un trade cerrado en paper trading
-- `POST /api/db/init` — crea las tablas de base de datos desde el modelo SQLAlchemy
+See [../DEPLOYMENT.md](../DEPLOYMENT.md).

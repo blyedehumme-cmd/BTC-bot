@@ -1,40 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../lib/api';
-
-type AiStatus = {
-  engine_status: string;
-  mode: string;
-  last_signal: string;
-  confidence: number;
-  last_analysis_time: string;
-  backend_connected: boolean;
-};
+import { useCallback } from 'react';
+import { fetchAiStatus, type AiStatus } from '../lib/pollingFetchers';
+import { usePolling } from '../lib/usePolling';
 
 export default function AiStatusPanel() {
-  const [status, setStatus] = useState<AiStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchStatus() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/ai/status`);
-        if (!response.ok) {
-          throw new Error('Backend offline');
-        }
-        const data: AiStatus = await response.json();
-        setStatus(data);
-      } catch (err) {
-        setError('Backend offline');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchStatus();
-  }, []);
+  const fetcher = useCallback(() => fetchAiStatus(), []);
+  const { data: status, loading, error } = usePolling<AiStatus>(fetcher);
 
   return (
     <div className="rounded-[32px] border border-slate-800 bg-surface/90 p-8 shadow-glow backdrop-blur-xl">

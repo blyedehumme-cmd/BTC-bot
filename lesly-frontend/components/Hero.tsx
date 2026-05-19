@@ -1,71 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import TradingPanel from './TradingPanel';
-import { API_BASE_URL } from '../lib/api';
-
-type LiveMarket = {
-  symbol: string;
-  price: number;
-  change_1h_pct: number;
-  signal: string;
-  confidence: number;
-  support: number;
-  resistance: number;
-  trend: string;
-  updated_at: string;
-  backend_connected: boolean;
-};
-
-type AiStatus = {
-  engine_status: string;
-  mode: string;
-  last_signal: string;
-  confidence: number;
-  risk_level: string;
-  last_analysis_time: string;
-  backend_connected: boolean;
-};
+import { fetchAiStatus, fetchLiveMarket, type AiStatus, type LiveMarket } from '../lib/pollingFetchers';
+import { usePolling } from '../lib/usePolling';
 
 export default function Hero() {
-  const [liveMarket, setLiveMarket] = useState<LiveMarket | null>(null);
-  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    console.log('Frontend API_BASE_URL:', API_BASE_URL);
-
-    let intervalId: NodeJS.Timeout;
-
-    async function fetchDashboardData() {
-      try {
-        const [marketRes, aiRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/market/live`),
-          fetch(`${API_BASE_URL}/ai/status`),
-        ]);
-
-        if (!marketRes.ok || !aiRes.ok) {
-          throw new Error('Backend offline');
-        }
-
-        const marketData = await marketRes.json();
-        const aiData = await aiRes.json();
-
-        setLiveMarket(marketData);
-        setAiStatus(aiData);
-        setError(null);
-      } catch (err) {
-        setError('Backend offline');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchDashboardData();
-    intervalId = setInterval(fetchDashboardData, 3000);
-    return () => clearInterval(intervalId);
-  }, []);
+  const marketFetcher = useCallback(() => fetchLiveMarket(), []);
+  const statusFetcher = useCallback(() => fetchAiStatus(), []);
+  const { data: liveMarket, loading: marketLoading, error: marketError } = usePolling<LiveMarket>(marketFetcher);
+  const { data: aiStatus, loading: statusLoading, error: statusError } = usePolling<AiStatus>(statusFetcher);
+  const loading = marketLoading || statusLoading;
+  const error = marketError || statusError;
 
   const priceLabel = liveMarket ? `$${liveMarket.price.toLocaleString()}` : '--';
   const priceChange = liveMarket ? `${liveMarket.change_1h_pct.toFixed(2)}% ${liveMarket.change_1h_pct >= 0 ? '↑' : '↓'}` : 'Live unavailable';

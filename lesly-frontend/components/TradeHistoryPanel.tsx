@@ -1,47 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../lib/api';
-
-type Trade = {
-  id: number;
-  signal_id: number;
-  entry_price: number;
-  stop_loss: number | null;
-  take_profit: number | null;
-  target_price: number | null;
-  closed_price: number | null;
-  result_pct: number | null;
-  status: string;
-  opened_at: string;
-  closed_at: string | null;
-  drawdown_pct: number | null;
-  notes: string | null;
-};
+import { useCallback } from 'react';
+import { fetchTrades, type Trade } from '../lib/pollingFetchers';
+import { usePolling } from '../lib/usePolling';
 
 export default function TradeHistoryPanel() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchTrades() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/trades`);
-        if (!response.ok) {
-          throw new Error('Backend offline');
-        }
-        const data: Trade[] = await response.json();
-        setTrades(data);
-      } catch (err) {
-        setError('Backend offline');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchTrades();
-  }, []);
+  const fetcher = useCallback(() => fetchTrades(), []);
+  const { data: trades, loading, error } = usePolling<Trade[]>(fetcher);
 
   return (
     <div className="rounded-[32px] border border-slate-800 bg-surface/90 p-8 shadow-glow backdrop-blur-xl">
@@ -55,8 +20,8 @@ export default function TradeHistoryPanel() {
       <div className="mt-8 space-y-4">
         {loading && <p className="text-slate-300">Loading trade history...</p>}
         {error && <p className="text-rose-400">{error}</p>}
-        {!loading && trades.length === 0 && <p className="text-slate-400">No closed trades available yet.</p>}
-        {trades.map((trade) => (
+        {!loading && (trades?.length ?? 0) === 0 && <p className="text-slate-400">No closed trades available yet.</p>}
+        {(trades ?? []).map((trade) => (
           <div key={trade.id} className="rounded-3xl border border-slate-800 bg-[#07101d]/90 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
               <span>Trade #{trade.id}</span>

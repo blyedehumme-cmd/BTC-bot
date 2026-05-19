@@ -63,10 +63,28 @@ python3 diagnose.py
 4. Paper trading y producción gradual
 5. Escalabilidad multiusuario
 
-## Frontend Deployment
+## Lesly Dashboard (frontend + backend)
 
-La interfaz de usuario del dashboard se encuentra en `lesly-frontend`. Para desplegarla en Vercel, usa la configuración de monorepo con `rootDirectory: "lesly-frontend"` y configura la variable de entorno pública:
+| Carpeta | Rol |
+|---------|-----|
+| `lesly-frontend/` | Dashboard Next.js (paper trading UI) |
+| `backend/` | API FastAPI + base de datos |
 
-- `NEXT_PUBLIC_BACKEND_URL=https://<YOUR_BACKEND_HOST>/api`
+El bot envía señales al backend con `BACKEND_API_URL`. El dashboard lee datos en vivo desde la API.
 
-Esto asegura que el dashboard apunte al backend de la API desde el dominio público de Vercel.
+### Despliegue
+
+Guía completa: [DEPLOYMENT.md](DEPLOYMENT.md)
+
+Resumen:
+
+1. Backend en Railway/Render + PostgreSQL (`DATABASE_URL`)
+2. Frontend en Vercel con `NEXT_PUBLIC_BACKEND_URL=https://<backend>/api`
+3. Bot en tu máquina/VPS con el mismo `BACKEND_API_URL`
+
+### Variables del bot para el backend
+
+```bash
+BACKEND_API_URL=http://localhost:8000/api   # local
+# BACKEND_API_URL=https://your-backend.railway.app/api   # producción
+```

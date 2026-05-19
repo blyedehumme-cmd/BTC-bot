@@ -48,8 +48,32 @@ class AiStatusResponse(BaseModel):
     backend_connected: bool
 
 
+class AiDecisionCreate(BaseModel):
+    signal_id: int = 0
+    decision_type: str
+    reason: str
+    condition_snapshot: str | None = None
+    explanation: str
+    timestamp: datetime | None = None
+
+
+class AiDecisionResponse(BaseModel):
+    id: int
+    signal_id: int
+    decision_type: str
+    reason: str
+    condition_snapshot: str | None = None
+    explanation: str
+    timestamp: datetime
+
+    model_config = {
+        'from_attributes': True,
+    }
+
+
 class StrategyPerformanceResponse(BaseModel):
-    total_signals: int
+    total_trades: int
+    total_signals: int | None = None
     wins: int
     losses: int
     win_rate: int

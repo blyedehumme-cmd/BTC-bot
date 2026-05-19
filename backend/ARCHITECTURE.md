@@ -1,55 +1,83 @@
-# Backend Architecture for Lesly AI Trading
+# Backend Architecture — Lesly AI Trading
 
-## Propósito
+## Role
 
-Este backend es un scaffold inicial para el motor de señales y la API de Lesly. Se diseña para:
+The backend is a **persistence and API layer**. It does **not** generate trading signals.
 
-- Mantener `paper trading` como modo por defecto.
-- No ejecutar órdenes reales.
-- No conectar Coinbase todavía.
-- Ser escalable con FastAPI y PostgreSQL.
+| Component | Responsibility |
+|-----------|----------------|
+| `btc_bot.py` | Multi-timeframe analysis, risk rules, optional OpenAI assist, Telegram |
+| `backend/` | Store signals, snapshots, trades, AI decisions; serve live BTC price to the UI |
 
-## Componentes principales
+## Stack
 
-### Frontend
+- FastAPI + SQLAlchemy (async)
+- SQLite (`./lesly.db`) for local development
+- PostgreSQL (`asyncpg`) for production
+- Alembic migrations
 
-- `lesly-frontend/`
-- Next.js + React + Tailwind CSS
+## Data flow
 
-### Backend
+```mermaid
+sequenceDiagram
+  participant Bot as btc_bot.py
+  participant API as FastAPI
+  participant DB as Database
+  participant UI as lesly-frontend
 
-- `backend/app/main.py` — aplicación FastAPI principal
-- `backend/app/api/` — endpoints REST para salud y señales
-- `backend/app/core/` — configuración y settings
-- `backend/app/db/` — conexión y sesión de la base de datos
-- `backend/app/models/` — modelos SQLAlchemy
-- `backend/app/schemas/` — DTOs Pydantic
-- `backend/app/services/` — lógica de señal, datos de mercado y aprendizaje futuro
-- `backend/app/utils/` — utilidades comunes (logger, seguridad)
+  Bot->>API: POST /signals
+  Bot->>API: POST /ai/decisions
+  Bot->>API: POST /market/snapshots
+  Bot->>API: POST /trades
+  UI->>API: GET /market/live
+  UI->>API: GET /logs
+  API->>DB: read/write
+```
 
-## Flujo inicial
+## API endpoints
 
-1. `GET /api/health` devuelve estado de salud y modo `paper_trading`.
-2. `GET /api/signals` devuelve señales simuladas.
-3. `POST /api/signals` crea una señal de ejemplo con explicación.
-4. El backend registra y prepara datos para futuros módulos de aprendizaje.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health + paper mode |
+| GET/POST | `/api/signals` | List / create signals |
+| GET/POST | `/api/market/snapshots` | Historical snapshots from bot |
+| GET | `/api/market/live` | Live BTC price + latest signal |
+| GET/POST | `/api/trades` | Paper trade ledger |
+| GET | `/api/ai/status` | Engine status from latest signal |
+| GET | `/api/ai/performance` | Win rate from closed trades + signal count |
+| POST | `/api/ai/decisions` | AI decision log (called by bot) |
+| GET | `/api/logs` | AI decision feed for dashboard |
+| POST | `/api/db/init` | Dev-only schema bootstrap |
 
-## Base de datos futura
+## Database tables
 
-Tablas iniciales:
+| Table | Written by |
+|-------|------------|
+| `signals` | Bot via POST `/signals` |
+| `ai_decisions` | Bot via POST `/ai/decisions` |
+| `market_snapshots` | Bot via POST `/market/snapshots` |
+| `trades_paper` | Bot via POST `/trades` |
+| `strategy_performance` | Reserved for future use |
+| `rejected_signals` | Reserved for future use |
+| `learning_notes` | Reserved for future use |
 
-- `signals`
-- `trades_paper`
-- `ai_decisions`
-- `market_snapshots`
-- `strategy_performance`
-- `rejected_signals`
-- `learning_notes`
+## Configuration
 
-## Siguiente paso recomendado
+See [`.env.example`](.env.example) and [../DEPLOYMENT.md](../DEPLOYMENT.md).
 
-1. Implementar migraciones con Alembic.
-2. Agregar conexión a PostgreSQL.
-3. Construir `signal_engine` y `risk_engine` con reglas de paper trading.
-4. Diseñar `ai_learning` para registrar resultados y evaluar performance.
-5. Conectar el frontend al backend con fetch/axios.
+Key variables:
+
+- `DATABASE_URL` — SQLite or PostgreSQL (auto-normalized for asyncpg)
+- `ENVIRONMENT` — `development` or `production`
+- `CORS_ORIGINS` — comma-separated frontend URLs
+- `SECRET_KEY` — set a strong value in production
+
+## Local run
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Production Docker image runs `alembic upgrade head` before Uvicorn.

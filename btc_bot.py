@@ -767,11 +767,43 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> Dict[str, Any]:
+    direction = analysis.get("signal", "WAIT")
+    reason = analysis.get("reason", "No reason provided.")
+    if direction in ["LONG", "SHORT"]:
+        decision_type = "signal_approved"
+    elif "Faltó confirmación IA" in reason:
+        decision_type = "ai_rejected"
+    elif direction == "WAIT":
+        decision_type = "analysis_wait"
+    else:
+        decision_type = "analysis"
+    hourly = analysis.get("hourly", {})
+    snapshot = {
+        "signal": direction,
+        "confidence": analysis.get("confidence", 0.0),
+        "trend_1h": hourly.get("trend"),
+        "adx": hourly.get("adx"),
+        "volume_ratio": hourly.get("volume_ratio"),
+    }
+    return {
+        "signal_id": signal_id,
+        "decision_type": decision_type,
+        "reason": f"{direction}: {reason[:200]}",
+        "condition_snapshot": json.dumps(snapshot),
+        "explanation": reason,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 async def send_signal_to_backend(analysis: Dict[str, Any]) -> None:
     if not BACKEND_API_URL:
         return
     payload = build_signal_payload(analysis)
-    await post_json_to_backend("signals", payload)
+    result = await post_json_to_backend("signals", payload)
+    signal_id = int(result.get("id", 0)) if isinstance(result, dict) else 0
+    decision_payload = build_ai_decision_payload(analysis, signal_id=signal_id)
+    await post_json_to_backend("ai/decisions", decision_payload)
 
 
 async def send_snapshot_to_backend(analysis: Dict[str, Any]) -> None:

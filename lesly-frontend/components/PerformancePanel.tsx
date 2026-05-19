@@ -1,40 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../lib/api';
-
-type Performance = {
-  total_signals: number;
-  wins: number;
-  losses: number;
-  win_rate: number;
-  average_return: number;
-  max_drawdown: number;
-};
+import { useCallback } from 'react';
+import { fetchPerformance, type Performance } from '../lib/pollingFetchers';
+import { usePolling } from '../lib/usePolling';
 
 export default function PerformancePanel() {
-  const [performance, setPerformance] = useState<Performance | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchPerformance() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/ai/performance`);
-        if (!response.ok) {
-          throw new Error('Backend offline');
-        }
-        const data: Performance = await response.json();
-        setPerformance(data);
-      } catch (err) {
-        setError('Backend offline');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchPerformance();
-  }, []);
+  const fetcher = useCallback(() => fetchPerformance(), []);
+  const { data: performance, loading, error } = usePolling<Performance>(fetcher);
 
   return (
     <div className="rounded-[32px] border border-slate-800 bg-surface/90 p-8 shadow-glow backdrop-blur-xl">
@@ -50,6 +22,10 @@ export default function PerformancePanel() {
         {error && <p className="text-rose-400">{error}</p>}
         {performance && (
           <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-3xl bg-[#07101d]/90 p-5">
+              <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Total Trades</p>
+              <p className="mt-3 text-3xl font-semibold text-white">{performance.total_trades}</p>
+            </div>
             <div className="rounded-3xl bg-[#07101d]/90 p-5">
               <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Total Signals</p>
               <p className="mt-3 text-3xl font-semibold text-white">{performance.total_signals}</p>

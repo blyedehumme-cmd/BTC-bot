@@ -1,42 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../lib/api';
-
-type MarketSnapshot = {
-  symbol: string;
-  timeframe: string;
-  price: number;
-  trend: string;
-  support: number;
-  resistance: number;
-  volume: number;
-  updated_at: string;
-};
+import { useCallback } from 'react';
+import { fetchMarketSnapshots, type MarketSnapshot } from '../lib/pollingFetchers';
+import { usePolling } from '../lib/usePolling';
 
 export default function MarketSnapshotPanel() {
-  const [snapshots, setSnapshots] = useState<MarketSnapshot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchSnapshots() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/market/snapshots`);
-        if (!response.ok) {
-          throw new Error('Backend offline');
-        }
-        const data: MarketSnapshot[] = await response.json();
-        setSnapshots(data);
-      } catch (err) {
-        setError('Backend offline');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchSnapshots();
-  }, []);
+  const fetcher = useCallback(() => fetchMarketSnapshots(), []);
+  const { data: snapshots, loading, error } = usePolling<MarketSnapshot[]>(fetcher);
 
   return (
     <div className="rounded-[32px] border border-slate-800 bg-surface/90 p-8 shadow-glow backdrop-blur-xl">
@@ -50,8 +20,8 @@ export default function MarketSnapshotPanel() {
       <div className="mt-8 space-y-4">
         {loading && <p className="text-slate-300">Loading market snapshots...</p>}
         {error && <p className="text-rose-400">{error}</p>}
-        {!loading && snapshots.length === 0 && <p className="text-slate-400">No market data available.</p>}
-        {snapshots.map((snapshot) => (
+        {!loading && (snapshots?.length ?? 0) === 0 && <p className="text-slate-400">No market data available.</p>}
+        {(snapshots ?? []).map((snapshot) => (
           <div key={`${snapshot.symbol}-${snapshot.timeframe}`} className="rounded-3xl border border-slate-800 bg-[#07101d]/90 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
               <span>{snapshot.symbol}</span>
