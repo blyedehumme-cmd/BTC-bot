@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,11 +12,28 @@ KRAKEN_API_URL = 'https://api.kraken.com'
 TIMEOUT = 5
 
 
+def _normalize_closes(candle_data: list[object], index: int) -> list[float]:
+    closes: list[float] = []
+    for candle in candle_data:
+        if isinstance(candle, list) and len(candle) > index:
+            try:
+                closes.append(float(candle[index]))
+            except (TypeError, ValueError):
+                continue
+    return closes
+
+
+def _support_resistance_from_closes(closes: list[float], price: float) -> tuple[float, float]:
+    if closes:
+        return min(closes), max(closes)
+    return price * 0.995, price * 1.005
+
+
 def _coinbase_live_price() -> dict[str, object]:
     ticker = requests.get(f'{COINBASE_API_URL}/products/BTC-USD/ticker', timeout=TIMEOUT)
     ticker.raise_for_status()
     candle_resp = requests.get(
-        f'{COINBASE_API_URL}/products/BTC-USD/candles?granularity=3600&limit=2',
+        f'{COINBASE_API_URL}/products/BTC-USD/candles?granularity=3600&limit=24',
         timeout=TIMEOUT,
     )
     candle_resp.raise_for_status()
@@ -24,14 +41,18 @@ def _coinbase_live_price() -> dict[str, object]:
     candle_data = candle_resp.json()
     price = float(ticker_data.get('price', 0))
     change_pct = 0.0
-    if isinstance(candle_data, list) and len(candle_data) >= 2:
-        previous_close = float(candle_data[0][4])
+    closes = _normalize_closes(candle_data, 4)
+    if len(closes) >= 2:
+        previous_close = closes[0]
         if previous_close:
             change_pct = (price - previous_close) / previous_close * 100
+    support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'symbol': 'BTC-USD',
         'price': price,
         'change_1h_pct': round(change_pct, 2),
+        'support': round(support, 2),
+        'resistance': round(resistance, 2),
         'updated_at': datetime.utcnow().isoformat() + 'Z',
     }
 
@@ -40,7 +61,7 @@ def _binance_live_price() -> dict[str, object]:
     price_resp = requests.get(f'{BINANCE_API_URL}/api/v3/ticker/price?symbol=BTCUSDT', timeout=TIMEOUT)
     price_resp.raise_for_status()
     candle_resp = requests.get(
-        f'{BINANCE_API_URL}/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=2',
+        f'{BINANCE_API_URL}/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=24',
         timeout=TIMEOUT,
     )
     candle_resp.raise_for_status()
@@ -48,14 +69,18 @@ def _binance_live_price() -> dict[str, object]:
     candle_data = candle_resp.json()
     price = float(price_data.get('price', 0))
     change_pct = 0.0
-    if isinstance(candle_data, list) and len(candle_data) >= 2:
-        previous_close = float(candle_data[0][4])
+    closes = _normalize_closes(candle_data, 4)
+    if len(closes) >= 2:
+        previous_close = closes[0]
         if previous_close:
             change_pct = (price - previous_close) / previous_close * 100
+    support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'symbol': 'BTC-USDT',
         'price': price,
         'change_1h_pct': round(change_pct, 2),
+        'support': round(support, 2),
+        'resistance': round(resistance, 2),
         'updated_at': datetime.utcnow().isoformat() + 'Z',
     }
 
@@ -66,14 +91,27 @@ def _kraken_live_price() -> dict[str, object]:
     data = response.json()
     pair_data = next(iter(data.get('result', {}).values()), {})
     price = float(pair_data.get('c', [0])[0])
-    last_trade = float(pair_data.get('p', [0])[0]) if pair_data.get('p') else price
     change_pct = 0.0
-    if last_trade:
-        change_pct = (price - last_trade) / last_trade * 100
+    since = int((datetime.utcnow() - timedelta(hours=24)).timestamp())
+    ohlc_resp = requests.get(
+        f'{KRAKEN_API_URL}/0/public/OHLC?pair=XBTUSD&interval=60&since={since}',
+        timeout=TIMEOUT,
+    )
+    ohlc_resp.raise_for_status()
+    ohlc_data = ohlc_resp.json()
+    raw_ohlc = next(iter(ohlc_data.get('result', {}).values()), [])
+    closes = _normalize_closes(raw_ohlc, 4)
+    if len(closes) >= 2:
+        previous_close = closes[-2]
+        if previous_close:
+            change_pct = (price - previous_close) / previous_close * 100
+    support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'symbol': 'XBT-USD',
         'price': price,
         'change_1h_pct': round(change_pct, 2),
+        'support': round(support, 2),
+        'resistance': round(resistance, 2),
         'updated_at': datetime.utcnow().isoformat() + 'Z',
     }
 
@@ -104,8 +142,8 @@ async def get_live_market_status(db: AsyncSession) -> dict[str, object]:
         signal_text = latest_signal.direction
         confidence_level = latest_signal.confidence_score
 
-    support = float(latest_snapshot.support) if latest_snapshot else 0.0
-    resistance = float(latest_snapshot.resistance) if latest_snapshot else 0.0
+    support = float(market_data.get('support', 0.0))
+    resistance = float(market_data.get('resistance', 0.0))
     trend = latest_snapshot.trend if latest_snapshot else 'Unknown'
 
     return {

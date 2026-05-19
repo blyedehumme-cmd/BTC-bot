@@ -23,9 +23,9 @@ export default function Home() {
             <a href="#risk" className="hover:text-white transition">Risk Engine</a>
             <a href="#dashboard" className="hover:text-white transition">Dashboard</a>
           </nav>
-          <button className="rounded-full border border-glow px-6 py-2 text-sm text-glow shadow-glow transition hover:bg-glow/10">
+          <a href="#dashboard" className="rounded-full border border-glow px-6 py-2 text-sm text-glow shadow-glow transition hover:bg-glow/10">
             Launch App
-          </button>
+          </a>
         </header>
 
         <Hero />

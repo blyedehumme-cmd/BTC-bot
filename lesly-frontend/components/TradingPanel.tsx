@@ -1,20 +1,23 @@
 type TradingPanelProps = {
   symbol?: string;
-  price?: number;
-  signal?: string;
+  price?: number | null;
+  signal?: string | null;
 };
 
-export default function TradingPanel({ symbol = 'BTC/USDT', price = 63498, signal = 'LONG' }: TradingPanelProps) {
+export default function TradingPanel({ symbol = 'BTC/USDT', price = null, signal = 'WAIT' }: TradingPanelProps) {
+  const displayPrice = price != null ? `$${price.toLocaleString()}` : '—';
+  const displaySignal = signal ?? 'WAIT';
+
   return (
     <div className="relative overflow-hidden rounded-[32px] border border-slate-800 bg-[#02050e]/95 p-6 shadow-glow sm:p-8">
       <div className="absolute -left-16 top-10 h-72 w-72 rounded-full bg-glow/10 blur-3xl" />
       <div className="relative z-10 flex items-center justify-between text-sm text-slate-400">
         <div>
           <p className="uppercase tracking-[0.3em]">{symbol}</p>
-          <p className="mt-2 text-3xl font-semibold text-white">${price.toLocaleString()}</p>
+          <p className="mt-2 text-3xl font-semibold text-white">{displayPrice}</p>
         </div>
         <div className="rounded-full border border-glow/50 bg-slate-950/40 px-4 py-2 text-xs uppercase tracking-[0.18em] text-glow">
-          Signal: {signal}
+          Signal: {displaySignal}
         </div>
       </div>
       <div className="mt-8 rounded-[28px] border border-slate-800 bg-[#081020] p-5">
