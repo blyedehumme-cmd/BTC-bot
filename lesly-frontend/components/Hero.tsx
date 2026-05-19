@@ -62,7 +62,7 @@ export default function Hero() {
     }
 
     fetchDashboardData();
-    intervalId = setInterval(fetchDashboardData, 5000);
+    intervalId = setInterval(fetchDashboardData, 3000);
     return () => clearInterval(intervalId);
   }, []);
 
