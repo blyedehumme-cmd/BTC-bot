@@ -55,9 +55,9 @@ class StrategyPerformanceResponse(BaseModel):
 class MarketSnapshotResponse(BaseModel):
     symbol: str
     timeframe: str
-    price: int
+    price: float
     trend: str
-    support: int
-    resistance: int
-    volume: int
+    support: float
+    resistance: float
+    volume: float
     updated_at: str
