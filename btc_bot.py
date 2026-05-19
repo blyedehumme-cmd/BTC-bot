@@ -12,6 +12,8 @@ import json
 import tempfile
 import logging
 import asyncio
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
@@ -190,6 +192,30 @@ def get_client() -> RESTClient:
             raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET en Render.")
         client = RESTClient(api_key=CB_API_KEY, api_secret=CB_API_SECRET)
     return client
+
+
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000/api").strip().rstrip("/")
+
+
+def _post_json_to_backend(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    url = f"{BACKEND_API_URL}/{path.lstrip('/') }"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        logger.warning("Backend HTTP error %s: %s", exc.code, exc.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        logger.warning("Backend connection error: %s", exc)
+    except Exception as exc:
+        logger.warning("Error posting to backend: %s", exc)
+    return {}
+
+
+async def post_json_to_backend(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    return await asyncio.to_thread(_post_json_to_backend, path, payload)
 
 
 def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
@@ -564,6 +590,42 @@ def analyze_market() -> Dict[str, Any]:
     return signal
 
 
+def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    hourly = analysis.get("hourly", {})
+    price = hourly.get("price", 0.0)
+    atr = analysis.get("atr", 0.0)
+    support = max(0.0, price - atr * 1.5)
+    resistance = price + atr * 1.5
+    return {
+        "symbol": PRODUCT_ID,
+        "timeframe": "1H",
+        "price": price,
+        "trend": hourly.get("trend", "neutral"),
+        "support": support,
+        "resistance": resistance,
+        "volume": float(hourly.get("volume_ratio", 0.0)),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+async def send_signal_to_backend(analysis: Dict[str, Any]) -> None:
+    if not BACKEND_API_URL:
+        return
+    payload = {
+        "symbol": PRODUCT_ID,
+        "timeframe": "1H",
+        "direction": analysis.get("signal", "WAIT"),
+    }
+    await post_json_to_backend("signals", payload)
+
+
+async def send_snapshot_to_backend(analysis: Dict[str, Any]) -> None:
+    if not BACKEND_API_URL:
+        return
+    snapshot_payload = build_market_snapshot_payload(analysis)
+    await post_json_to_backend("market/snapshots", snapshot_payload)
+
+
 # =========================
 # GESTIÓN DEL RIESGO
 # =========================
@@ -762,6 +824,8 @@ async def trading_loop(app: Application):
                 await asyncio.sleep(ANALYZE_EVERY_SECONDS)
                 continue
             logger.info("Precio %.2f | Señal %s | Confianza %.2f | %s", price, analysis["signal"], analysis["confidence"], state.last_reason)
+            await send_snapshot_to_backend(analysis)
+            await send_signal_to_backend(analysis)
             if state.position_open:
                 exit_reason = manage_open_position(price, analysis["hourly"])
                 if exit_reason:

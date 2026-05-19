@@ -23,6 +23,7 @@ bot_state.json
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Byte-compiled / optimized / DLL files
 *.so
