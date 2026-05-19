@@ -52,6 +52,17 @@ class StrategyPerformanceResponse(BaseModel):
     max_drawdown: float
 
 
+class MarketSnapshotCreate(BaseModel):
+    symbol: str
+    timeframe: str
+    price: float
+    trend: str
+    support: float
+    resistance: float
+    volume: float
+    updated_at: datetime
+
+
 class MarketSnapshotResponse(BaseModel):
     symbol: str
     timeframe: str
@@ -61,3 +72,7 @@ class MarketSnapshotResponse(BaseModel):
     resistance: float
     volume: float
     updated_at: str
+
+    model_config = {
+        'from_attributes': True,
+    }
