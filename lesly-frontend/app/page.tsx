@@ -5,6 +5,7 @@ import AiStatusPanel from '../components/AiStatusPanel';
 import MarketSnapshotPanel from '../components/MarketSnapshotPanel';
 import PerformancePanel from '../components/PerformancePanel';
 import SignalBoard from '../components/SignalBoard';
+import TradeHistoryPanel from '../components/TradeHistoryPanel';
 import Footer from '../components/Footer';
 
 export default function Home() {
@@ -90,6 +91,7 @@ export default function Home() {
             <MarketSnapshotPanel />
             <SignalBoard />
             <PerformancePanel />
+            <TradeHistoryPanel />
           </div>
           <AiLogs />
         </section>
