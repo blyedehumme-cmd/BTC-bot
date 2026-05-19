@@ -48,5 +48,7 @@ python3 -c "from app.services.db_init import init_db; import asyncio; asyncio.ru
 - `GET /api/market/snapshots` — snapshots de mercado simulados
 - `POST /api/market/snapshots` — guarda un nuevo snapshot de mercado en la base de datos
 - `GET /api/ai/status` — estado del motor AI basado en datos de señales almacenadas
-- `GET /api/ai/performance` — resumen de performance calculado desde señales almacenadas
+- `GET /api/ai/performance` — resumen de performance calculado desde datos de paper trades
+- `GET /api/trades` — lista trades de paper trading persistidos
+- `POST /api/trades` — guarda un trade cerrado en paper trading
 - `POST /api/db/init` — crea las tablas de base de datos desde el modelo SQLAlchemy

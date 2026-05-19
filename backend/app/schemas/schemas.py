@@ -58,6 +58,33 @@ class StrategyPerformanceResponse(BaseModel):
     max_drawdown: float
 
 
+class PaperTradeBase(BaseModel):
+    signal_id: int
+    entry_price: float
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    target_price: float | None = None
+    closed_price: float | None = None
+    result_pct: float | None = None
+    status: str
+    opened_at: datetime | None = None
+    closed_at: datetime | None = None
+    drawdown_pct: float | None = None
+    notes: str | None = None
+
+
+class PaperTradeCreate(PaperTradeBase):
+    pass
+
+
+class PaperTradeResponse(PaperTradeBase):
+    id: int
+
+    model_config = {
+        'from_attributes': True,
+    }
+
+
 class MarketSnapshotCreate(BaseModel):
     symbol: str
     timeframe: str

@@ -639,6 +639,33 @@ async def send_snapshot_to_backend(analysis: Dict[str, Any]) -> None:
     await post_json_to_backend("market/snapshots", snapshot_payload)
 
 
+def build_trade_payload(price: float, pnl: float, stop: float, take: float) -> Dict[str, Any]:
+    opened_at = datetime.utcfromtimestamp(state.last_trade_ts).isoformat() + "Z" if state.last_trade_ts else datetime.utcnow().isoformat() + "Z"
+    closed_at = datetime.utcnow().isoformat() + "Z"
+    result_pct = (pnl / state.position_usd * 100) if state.position_usd else 0.0
+    return {
+        "signal_id": 0,
+        "entry_price": state.entry_price,
+        "stop_loss": state.stop_loss,
+        "take_profit": state.take_profit,
+        "target_price": take,
+        "closed_price": price,
+        "result_pct": result_pct,
+        "status": "CLOSED",
+        "opened_at": opened_at,
+        "closed_at": closed_at,
+        "drawdown_pct": 0.0,
+        "notes": state.last_reason,
+    }
+
+
+async def send_trade_to_backend(price: float, pnl: float, stop: float, take: float) -> None:
+    if not BACKEND_API_URL:
+        return
+    trade_payload = build_trade_payload(price, pnl, stop, take)
+    await post_json_to_backend("trades", trade_payload)
+
+
 # =========================
 # GESTIÓN DEL RIESGO
 # =========================
@@ -845,6 +872,7 @@ async def trading_loop(app: Application):
                     place_market_order("SELL" if state.side == "LONG" else "BUY", base_size=state.position_size_btc if state.side == "LONG" else None, quote_size=None if state.side == "LONG" else state.position_usd)
                     record_trade_pnl(price)
                     pnl = (price - state.entry_price) * state.position_size_btc if state.side == "LONG" else (state.entry_price - price) * state.position_size_btc
+                    await send_trade_to_backend(price, pnl, state.stop_loss, state.take_profit)
                     win_rate = (state.stats.wins / state.stats.total_trades * 100) if state.stats.total_trades else 0
                     await send_telegram(app, f"{('🟢' if pnl >= 0 else '🔴')} Trade {('ganado' if pnl >= 0 else 'perdido')}\nResultado: ${pnl:.2f}\nPnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\nWin Rate: {win_rate:.2f}%\nSalida: {exit_reason}\nPrecio salida: {price:.2f}\nEntrada: {state.entry_price:.2f}\nBTC: {state.position_size_btc:.8f}")
                     state.position_open = False
