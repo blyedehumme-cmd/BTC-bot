@@ -2,11 +2,26 @@ type TradingPanelProps = {
   symbol?: string;
   price?: number | null;
   signal?: string | null;
+  confidence?: number | null;
+  riskLevel?: string | null;
+  support?: number | null;
+  resistance?: number | null;
 };
 
-export default function TradingPanel({ symbol = 'BTC/USDT', price = null, signal = 'WAIT' }: TradingPanelProps) {
+export default function TradingPanel({
+  symbol = 'BTC/USDT',
+  price = null,
+  signal = 'WAIT',
+  confidence = null,
+  riskLevel = 'Unknown',
+  support = null,
+  resistance = null,
+}: TradingPanelProps) {
   const displayPrice = price != null ? `$${price.toLocaleString()}` : '—';
   const displaySignal = signal ?? 'WAIT';
+  const displayConfidence = confidence != null ? `${confidence}%` : '—';
+  const displaySupport = support != null ? `$${support.toLocaleString()}` : '—';
+  const displayResistance = resistance != null ? `$${resistance.toLocaleString()}` : '—';
 
   return (
     <div className="relative overflow-hidden rounded-[32px] border border-slate-800 bg-[#02050e]/95 p-6 shadow-glow sm:p-8">
@@ -45,10 +60,10 @@ export default function TradingPanel({ symbol = 'BTC/USDT', price = null, signal
         </div>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {[
-            { label: 'Confidence', value: '87%' },
-            { label: 'Risk Level', value: 'Low' },
-            { label: 'Support', value: '$63,120' },
-            { label: 'Resistance', value: '$63,860' },
+            { label: 'Confidence', value: displayConfidence },
+            { label: 'Risk Level', value: riskLevel ?? 'Unknown' },
+            { label: 'Support', value: displaySupport },
+            { label: 'Resistance', value: displayResistance },
           ].map((item) => (
             <div key={item.label} className="rounded-3xl bg-slate-950/80 p-4">
               <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{item.label}</p>

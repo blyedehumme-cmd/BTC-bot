@@ -22,6 +22,7 @@ type AiStatus = {
   mode: string;
   last_signal: string;
   confidence: number;
+  risk_level: string;
   last_analysis_time: string;
   backend_connected: boolean;
 };
@@ -68,12 +69,13 @@ export default function Hero() {
 
   const priceLabel = liveMarket ? `$${liveMarket.price.toLocaleString()}` : '--';
   const priceChange = liveMarket ? `${liveMarket.change_1h_pct.toFixed(2)}% ${liveMarket.change_1h_pct >= 0 ? '↑' : '↓'}` : 'Live unavailable';
-  const signalLabel = liveMarket?.signal ?? 'WAIT';
-  const confidenceLabel = liveMarket ? `${liveMarket.confidence}%` : '—';
-  const supportLabel = liveMarket ? `$${liveMarket.support.toLocaleString()}` : '—';
-  const resistanceLabel = liveMarket ? `$${liveMarket.resistance.toLocaleString()}` : '—';
+  const signalLabel = liveMarket?.signal ?? aiStatus?.last_signal ?? 'WAIT';
+  const confidenceLabel = liveMarket?.confidence != null ? `${liveMarket.confidence}%` : aiStatus?.confidence != null ? `${aiStatus.confidence}%` : '—';
+  const supportLabel = liveMarket?.support != null ? `$${liveMarket.support.toLocaleString()}` : '—';
+  const resistanceLabel = liveMarket?.resistance != null ? `$${liveMarket.resistance.toLocaleString()}` : '—';
   const statusLabel = aiStatus?.engine_status ?? 'Offline';
   const modeLabel = aiStatus?.mode.replace('_', ' ') ?? 'PAPER TRADING';
+  const riskLevel = aiStatus?.risk_level ?? 'Unknown';
 
   return (
     <section id="dashboard" className="relative overflow-hidden rounded-[40px] border border-slate-800 bg-surface/90 px-6 py-10 shadow-glow backdrop-blur-xl sm:px-10 lg:px-14">
@@ -124,7 +126,14 @@ export default function Hero() {
             </div>
           </div>
         </div>
-        <TradingPanel signal={liveMarket?.signal} price={liveMarket?.price} />
+        <TradingPanel
+          signal={liveMarket?.signal ?? aiStatus?.last_signal}
+          price={liveMarket?.price}
+          confidence={liveMarket?.confidence ?? aiStatus?.confidence}
+          riskLevel={aiStatus?.risk_level}
+          support={liveMarket?.support}
+          resistance={liveMarket?.resistance}
+        />
       </div>
     </section>
   );

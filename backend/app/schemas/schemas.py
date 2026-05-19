@@ -43,6 +43,7 @@ class AiStatusResponse(BaseModel):
     mode: str
     last_signal: str
     confidence: int
+    risk_level: str
     last_analysis_time: str
     backend_connected: bool
 
