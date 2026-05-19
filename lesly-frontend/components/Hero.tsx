@@ -71,8 +71,20 @@ export default function Hero() {
   const priceChange = liveMarket ? `${liveMarket.change_1h_pct.toFixed(2)}% ${liveMarket.change_1h_pct >= 0 ? '↑' : '↓'}` : 'Live unavailable';
   const signalLabel = liveMarket?.signal ?? aiStatus?.last_signal ?? 'WAIT';
   const confidenceLabel = liveMarket?.confidence != null ? `${liveMarket.confidence}%` : aiStatus?.confidence != null ? `${aiStatus.confidence}%` : '—';
-  const supportLabel = liveMarket?.support != null ? `$${liveMarket.support.toLocaleString()}` : '—';
-  const resistanceLabel = liveMarket?.resistance != null ? `$${liveMarket.resistance.toLocaleString()}` : '—';
+  const supportValue =
+    liveMarket?.support != null && liveMarket.support > 0
+      ? liveMarket.support
+      : liveMarket?.price != null
+      ? liveMarket.price * 0.995
+      : null;
+  const resistanceValue =
+    liveMarket?.resistance != null && liveMarket.resistance > 0
+      ? liveMarket.resistance
+      : liveMarket?.price != null
+      ? liveMarket.price * 1.005
+      : null;
+  const supportLabel = supportValue != null ? `$${supportValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+  const resistanceLabel = resistanceValue != null ? `$${resistanceValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
   const statusLabel = aiStatus?.engine_status ?? 'Offline';
   const modeLabel = aiStatus?.mode.replace('_', ' ') ?? 'PAPER TRADING';
   const riskLevel = aiStatus?.risk_level ?? 'Unknown';
@@ -131,8 +143,8 @@ export default function Hero() {
           price={liveMarket?.price}
           confidence={liveMarket?.confidence ?? aiStatus?.confidence}
           riskLevel={aiStatus?.risk_level}
-          support={liveMarket?.support}
-          resistance={liveMarket?.resistance}
+          support={supportValue}
+          resistance={resistanceValue}
         />
       </div>
     </section>

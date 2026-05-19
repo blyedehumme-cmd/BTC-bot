@@ -17,8 +17,3 @@ async def ai_status(db: AsyncSession = Depends(get_db)):
 @router.get('/performance', response_model=StrategyPerformanceResponse)
 async def ai_performance(db: AsyncSession = Depends(get_db)):
     return await get_performance_summary(db)
-
-
-@router.get('/market/live', response_model=MarketLiveResponse)
-def market_live(db: AsyncSession = Depends(get_db)):
-    return get_live_market_status(db)

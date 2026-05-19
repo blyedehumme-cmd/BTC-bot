@@ -9,6 +9,7 @@ import os
 import time
 import math
 import json
+import re
 import tempfile
 import logging
 import asyncio
@@ -17,6 +18,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
+
+import requests
+try:
+    import openai
+except ImportError:
+    openai = None
 
 from coinbase.rest import RESTClient
 from telegram import Update
@@ -43,6 +50,10 @@ MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "true").lower().strip() == "true"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo").strip()
+OPENAI_ASSIST_ENABLED = bool(OPENAI_API_KEY)
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
 
 EMA_FAST = 21
@@ -432,6 +443,105 @@ def ai_quality_filter(analysis: Dict[str, Any]) -> bool:
     return True
 
 
+def _clean_openai_text(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.replace("```", "", 2).strip()
+    return text
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    text = _clean_openai_text(text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    fragment = text[start:end + 1]
+    try:
+        return json.loads(fragment)
+    except json.JSONDecodeError:
+        try:
+            import ast
+            return ast.literal_eval(fragment)
+        except Exception:
+            return {}
+
+
+def _format_analysis_block(label: str, data: Dict[str, Any]) -> str:
+    return (
+        f"{label}:\n"
+        f"  trend: {data['trend']}\n"
+        f"  price: {data['price']}\n"
+        f"  ema21: {data['ema21']}\n"
+        f"  ema50: {data['ema50']}\n"
+        f"  ema100: {data['ema100']}\n"
+        f"  macd_hist: {data['macd']['hist']}\n"
+        f"  adx: {data['adx']}\n"
+        f"  volume_ratio: {data['volume_ratio']}\n"
+    )
+
+
+def _build_openai_assist_prompt(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> str:
+    return (
+        "Eres un asistente de trading de BTC en modo DRY_RUN y PAPER. "
+        "Tu función es apoyar la estrategia actual basada en EMA, MACD, ADX y volumen, "
+        "sin reemplazar la lógica principal. Usa estos datos técnicos para: análisis de señales, validación de entradas, explicación de trades, análisis de riesgo y resumen de mercado.\n\n"
+        "Responde únicamente con un objeto JSON con las siguientes claves:"
+        " allow (true/false), validation (string), signal_reason (string), risk_summary (string), market_summary (string), extra_reasons (list).\n\n"
+        "Datos técnicos:\n"
+        f"{_format_analysis_block('Weekly', weekly)}"
+        f"{_format_analysis_block('Daily', daily)}"
+        f"{_format_analysis_block('4H', fourh)}"
+        f"{_format_analysis_block('1H', hourly)}"
+    )
+
+
+def _openai_assist(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
+    if not OPENAI_ASSIST_ENABLED or not USE_AI_ASSIST:
+        return {}
+    if not OPENAI_API_KEY:
+        return {}
+    messages = [
+        {
+            "role": "system",
+            "content": "Eres un asistente experto en trading que apoya decisiones de un bot de BTC en modo de simulación DRY_RUN.",
+        },
+        {
+            "role": "user",
+            "content": _build_openai_assist_prompt(weekly, daily, fourh, hourly),
+        },
+    ]
+    try:
+        if openai is not None:
+            openai.api_key = OPENAI_API_KEY
+            response = openai.ChatCompletion.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=320,
+            )
+            text = response.choices[0].message.content
+        else:
+            payload = {
+                "model": OPENAI_MODEL,
+                "messages": messages,
+                "temperature": 0.2,
+                "max_tokens": 320,
+            }
+            headers = {
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=20)
+            response.raise_for_status()
+            _, data = response.text, response.json()
+            text = data.get("choices", [])[0].get("message", {}).get("content", "")
+        return _extract_json_object(text)
+    except Exception as exc:
+        logger.warning("OpenAI assist error: %s", exc)
+        return {}
+
+
 def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
     score = 0.0
     reasons: List[str] = []
@@ -468,7 +578,35 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
         reasons.append("Tendencia 1D neutral")
 
     allow = score >= 0.60
-    return {"allow": allow, "score": score, "reasons": reasons}
+    openai_feedback = _openai_assist(weekly, daily, fourh, hourly)
+    if openai_feedback:
+        openai_allow = openai_feedback.get("allow")
+        if isinstance(openai_allow, bool):
+            allow = allow and openai_allow
+
+        validation_text = openai_feedback.get("validation")
+        if validation_text:
+            reasons.append(f"IA validación: {validation_text}")
+
+        signal_reason = openai_feedback.get("signal_reason")
+        if signal_reason:
+            reasons.append(f"IA señal: {signal_reason}")
+
+        risk_summary = openai_feedback.get("risk_summary")
+        if risk_summary:
+            reasons.append(f"IA riesgo: {risk_summary}")
+
+        market_summary = openai_feedback.get("market_summary")
+        if market_summary:
+            reasons.append(f"IA resumen: {market_summary}")
+
+        extra_reasons = openai_feedback.get("extra_reasons")
+        if isinstance(extra_reasons, list):
+            for extra in extra_reasons:
+                if isinstance(extra, str) and extra.strip():
+                    reasons.append(f"IA extra: {extra}")
+
+    return {"allow": allow, "score": score, "reasons": reasons, "openai": openai_feedback}
 
 
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
@@ -594,8 +732,12 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     hourly = analysis.get("hourly", {})
     price = hourly.get("price", 0.0)
     atr = analysis.get("atr", 0.0)
-    support = max(0.0, price - atr * 1.5)
-    resistance = price + atr * 1.5
+    if atr <= 0:
+        support = price * 0.995
+        resistance = price * 1.005
+    else:
+        support = max(0.0, price - atr * 1.5)
+        resistance = price + atr * 1.5
     return {
         "symbol": PRODUCT_ID,
         "timeframe": "1H",
@@ -617,7 +759,7 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "timeframe": "1H",
         "direction": direction,
         "confidence_score": max(0, min(confidence, 100)),
-        "risk_level": "high" if confidence >= 80 else "medium" if confidence >= 50 else "low",
+        "risk_level": "low" if confidence >= 80 else "medium" if confidence >= 50 else "high",
         "market_condition": trend,
         "approved": direction in ["LONG", "SHORT"],
         "explanation": analysis.get("reason", "No reason provided."),

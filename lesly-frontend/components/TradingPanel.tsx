@@ -17,11 +17,13 @@ export default function TradingPanel({
   support = null,
   resistance = null,
 }: TradingPanelProps) {
-  const displayPrice = price != null ? `$${price.toLocaleString()}` : '—';
+  const displayPrice = price != null ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
   const displaySignal = signal ?? 'WAIT';
   const displayConfidence = confidence != null ? `${confidence}%` : '—';
-  const displaySupport = support != null ? `$${support.toLocaleString()}` : '—';
-  const displayResistance = resistance != null ? `$${resistance.toLocaleString()}` : '—';
+  const supportValue = support != null ? support : price != null ? price * 0.995 : null;
+  const resistanceValue = resistance != null ? resistance : price != null ? price * 1.005 : null;
+  const displaySupport = supportValue != null ? `$${supportValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+  const displayResistance = resistanceValue != null ? `$${resistanceValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
   return (
     <div className="relative overflow-hidden rounded-[32px] border border-slate-800 bg-[#02050e]/95 p-6 shadow-glow sm:p-8">

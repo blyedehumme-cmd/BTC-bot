@@ -25,7 +25,11 @@ def _normalize_closes(candle_data: list[object], index: int) -> list[float]:
 
 def _support_resistance_from_closes(closes: list[float], price: float) -> tuple[float, float]:
     if closes:
-        return min(closes), max(closes)
+        lowest = min(closes)
+        highest = max(closes)
+        support = min(lowest, price * 0.995)
+        resistance = max(highest, price * 1.005)
+        return support, resistance
     return price * 0.995, price * 1.005
 
 
