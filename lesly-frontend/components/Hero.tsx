@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import TradingPanel from './TradingPanel';
 import { fetchAiStatus, fetchLiveMarket, type AiStatus, type LiveMarket } from '../lib/pollingFetchers';
+import { API_BASE_URL } from '../lib/api';
 import { usePolling } from '../lib/usePolling';
 
 export default function Hero() {
