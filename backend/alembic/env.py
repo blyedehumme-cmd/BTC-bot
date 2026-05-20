@@ -1,5 +1,6 @@
 import asyncio
 import os
+import ssl
 import sys
 from logging.config import fileConfig
 
@@ -36,10 +37,12 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    connect_args = {'ssl': ssl.create_default_context()} if settings.database_ssl else {}
     connectable = create_async_engine(
         config.get_main_option('sqlalchemy.url'),
         poolclass=pool.NullPool,
         future=True,
+        connect_args=connect_args,
     )
 
     async def do_run_migrations() -> None:
