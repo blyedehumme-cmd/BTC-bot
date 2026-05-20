@@ -1,9 +1,0 @@
-{
-  "name": "btc-bot-monorepo",
-  "private": true,
-  "scripts": {
-    "build": "cd lesly-frontend && npm run build",
-    "dev": "cd lesly-frontend && npm run dev",
-    "start": "cd lesly-frontend && npm run start"
-  }
-}

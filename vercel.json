@@ -1,5 +1,15 @@
 {
-  "installCommand": "cd lesly-frontend && npm install",
-  "buildCommand": "cd lesly-frontend && npm run build",
-  "outputDirectory": "lesly-frontend/.next"
+  "version": 2,
+  "builds": [
+    {
+      "src": "lesly-frontend/package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "lesly-frontend/$1"
+    }
+  ]
 }
