@@ -30,6 +30,7 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
   - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)
   - `RUN_ONCE` (`true` para smoke tests)
   - `ALLOW_REAL_SPOT_SHORT` (mantener `false` en Coinbase spot)
+  - `TELEGRAM_POLLING_ENABLED` (`false` recomendado en Render para evitar conflictos `getUpdates`)
 
 ## Instalación
 
@@ -43,7 +44,15 @@ pip install -r requirements.txt
 python3 btc_bot.py
 ```
 
-El bot valida la configuración y ejecuta el loop principal usando Telegram para alertas. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque Coinbase spot no abre posiciones cortas reales.
+El bot valida la configuración y ejecuta el loop principal. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque Coinbase spot no abre posiciones cortas reales.
+
+Telegram puede enviar notificaciones sin polling. Para evitar `telegram.error.Conflict: terminated by other getUpdates request` en Render, deja:
+
+```bash
+TELEGRAM_POLLING_ENABLED=false
+```
+
+Activa `TELEGRAM_POLLING_ENABLED=true` solo si quieres comandos `/start`, `/pause`, `/status`, etc. y tienes una sola instancia del bot usando ese token.
 
 ## Comandos de Telegram
 

@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from coinbase.rest import RESTClient
-from telegram import Update
+from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # =========================
@@ -36,6 +36,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
+TELEGRAM_POLLING_ENABLED = os.getenv("TELEGRAM_POLLING_ENABLED", "false").lower().strip() == "true"
 CB_API_KEY = os.getenv("CB_API_KEY", "").strip()
 CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
 PRODUCT_ID = os.getenv("PRODUCT_ID", "BTC-USDC").strip()
@@ -108,6 +109,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("btc-bot")
 client: Optional[RESTClient] = None
+telegram_bot: Optional[Bot] = None
 
 
 # =========================
@@ -942,14 +944,17 @@ def close_position_state() -> None:
 # =========================
 
 async def send_telegram(app: Optional[Application], message: str) -> None:
+    global telegram_bot
     if not TELEGRAM_TOKEN or not CHAT_ID:
         logger.info("telegram_disabled message=%s", message)
         return
-    if app is None:
-        logger.info("telegram_not_initialized message=%s", message)
-        return
     try:
-        await app.bot.send_message(chat_id=CHAT_ID, text=message)
+        if app is not None:
+            await app.bot.send_message(chat_id=CHAT_ID, text=message)
+            return
+        if telegram_bot is None:
+            telegram_bot = Bot(token=TELEGRAM_TOKEN)
+        await telegram_bot.send_message(chat_id=CHAT_ID, text=message)
     except Exception as exc:
         logger.error("telegram_send_failed error=%s", exc)
 
@@ -1158,6 +1163,8 @@ def validate_config() -> None:
         logger.warning("CHAT_ID no configurado; Telegram deshabilitado.")
     if CHAT_ID and not TELEGRAM_TOKEN:
         logger.warning("TELEGRAM_TOKEN no configurado; Telegram deshabilitado.")
+    if TELEGRAM_TOKEN and CHAT_ID and not TELEGRAM_POLLING_ENABLED:
+        logger.info("telegram_polling disabled=true notifications_enabled=true")
     if not BACKEND_API_URL:
         logger.info("backend_client disabled=true")
 
@@ -1168,7 +1175,7 @@ def main() -> None:
     if not DRY_RUN:
         get_client()
 
-    use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID)
+    use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID and TELEGRAM_POLLING_ENABLED)
     app: Optional[Application] = None
     if use_telegram:
         app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
@@ -1179,9 +1186,9 @@ def main() -> None:
         app.add_handler(CommandHandler("stats", stats_cmd))
         app.add_handler(CommandHandler("signal", signal_cmd))
 
-    logger.info("startup dry_run=%s telegram=%s product=%s", DRY_RUN, use_telegram, PRODUCT_ID)
+    logger.info("startup dry_run=%s telegram_polling=%s product=%s", DRY_RUN, use_telegram, PRODUCT_ID)
     if use_telegram:
-        app.run_polling()
+        app.run_polling(drop_pending_updates=True)
     else:
         asyncio.run(trading_loop(None))
 
