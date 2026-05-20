@@ -1,4 +1,5 @@
 {
-  "version": 3,
-  "rootDirectory": "lesly-frontend"
+  "installCommand": "cd lesly-frontend && npm install",
+  "buildCommand": "cd lesly-frontend && npm run build",
+  "outputDirectory": "lesly-frontend/.next"
 }

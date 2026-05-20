@@ -183,9 +183,37 @@ function Sidebar() {
 
 function ControlButtons() {
   return (
-    <div className="premium-card grid grid-cols-2 gap-3 p-4">
+    <div className="premium-card grid h-full min-h-[118px] grid-cols-2 gap-3 p-4">
       <button className="energy-button energy-start" type="button"><span>▶</span> START BOT</button>
       <button className="energy-button energy-stop" type="button"><span>■</span> STOP BOT</button>
+    </div>
+  );
+}
+
+function SystemStatus({ aiStatus }: { aiStatus: AiStatus | null }) {
+  const healthy = aiStatus?.backend_connected !== false;
+  const checks = [
+    'Conexión API',
+    'Análisis de mercado',
+    'Gestión de riesgo',
+    'Ejecución de órdenes',
+    'IA & aprendizaje',
+  ];
+
+  return (
+    <div className="premium-card h-full p-5">
+      <div className="panel-head"><h2>Estado del sistema</h2><span>{healthy ? 'óptimo' : 'alerta'}</span></div>
+      <div className="flex flex-col items-center">
+        <div className="system-orb h-36 w-36"><span className="h-24 w-24 text-3xl">{healthy ? '100%' : '72%'}</span></div>
+        <div className="mt-6 w-full space-y-3 text-sm text-slate-300">
+          {checks.map((item) => (
+            <p key={item} className="flex items-center gap-3">
+              <span className={`grid h-5 w-5 place-items-center rounded ${healthy ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-black'}`}>✓</span>
+              {item}
+            </p>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -221,7 +249,7 @@ export default function PremiumDashboard() {
       <div className="relative z-10 flex gap-4 p-3 sm:p-4">
         <Sidebar />
         <section className="min-w-0 flex-1 space-y-4">
-          <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <header className="xl:hidden">
             <div className="premium-card flex items-center justify-between gap-4 p-4 xl:hidden">
               <div>
                 <p className="text-2xl font-bold text-white">LESLY</p>
@@ -229,11 +257,6 @@ export default function PremiumDashboard() {
               </div>
               <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">Online</span>
             </div>
-            <div>
-              <p className="panel-label">AI Control Center</p>
-              <h1 className="mt-2 text-3xl font-semibold text-white sm:text-5xl">Lesly Trading Terminal</h1>
-            </div>
-            <ControlButtons />
           </header>
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -241,15 +264,7 @@ export default function PremiumDashboard() {
             <MetricCard label="Equity" value={formatMoney(12845.3 + pnl)} sub={formatPct(performance?.average_return)} values={spark.slice().reverse()} tone="cyan" />
             <MetricCard label="P&L simulado" value={`${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`} sub="trades cerrados" values={recentTrades.map((trade, i) => (trade.result_pct ?? 0) + i + 8)} tone={pnl >= 0 ? 'green' : 'red'} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} values={[10, 14, 12, confidence || 20, 28, 34]} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} />
-            <div className="premium-card p-5">
-              <p className="panel-label">Estado del sistema</p>
-              <div className="mt-4 flex items-center gap-4">
-                <div className="system-orb"><span>{aiStatus?.backend_connected === false ? '72%' : '100%'}</span></div>
-                <div className="space-y-2 text-sm text-slate-300">
-                  {['Conexión API', 'Análisis de mercado', 'Gestión de riesgo'].map((item) => <p key={item}>✅ {item}</p>)}
-                </div>
-              </div>
-            </div>
+            <ControlButtons />
           </section>
 
           <section id="dashboard" className="grid gap-4 xl:grid-cols-[1.55fr_0.72fr_0.62fr]">
@@ -279,20 +294,7 @@ export default function PremiumDashboard() {
               </div>
             </div>
 
-            <div className="premium-card p-5">
-              <div className="panel-head"><h2>IA análisis</h2><span>{aiStatus?.engine_status ?? 'online'}</span></div>
-              <div className="space-y-4">
-                {[
-                  ['Señal', signal],
-                  ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral'],
-                  ['Temporalidad', timeframe],
-                  ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
-                  ['Validación IA', aiStatus?.mode ?? 'paper'],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className="mt-1 font-semibold text-white">{value}</p></div>
-                ))}
-              </div>
-            </div>
+            <SystemStatus aiStatus={aiStatus} />
           </section>
 
           <section id="señales" className="grid gap-4 xl:grid-cols-[0.9fr_1fr_0.82fr]">
@@ -334,7 +336,21 @@ export default function PremiumDashboard() {
             </div>
           </section>
 
-          <section id="ia-chat" className="grid gap-4 xl:grid-cols-[1fr_0.82fr]">
+          <section id="ia-chat" className="grid gap-4 xl:grid-cols-[0.82fr_1fr_0.82fr]">
+            <div className="premium-card p-5">
+              <div className="panel-head"><h2>IA análisis</h2><span>{aiStatus?.engine_status ?? 'online'}</span></div>
+              <div className="space-y-4">
+                {[
+                  ['Señal', signal],
+                  ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral'],
+                  ['Temporalidad dominante', timeframe],
+                  ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
+                  ['Validación IA', aiStatus?.mode ?? 'paper'],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className="mt-1 font-semibold text-white">{value}</p></div>
+                ))}
+              </div>
+            </div>
             <div className="premium-card p-5">
               <div className="panel-head"><h2>IA chat</h2><span>decision stream</span></div>
               <div className="space-y-3">
