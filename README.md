@@ -11,6 +11,10 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
 - IA asistida como filtro de calidad (no controla la estrategia)
 - Notificaciones por Telegram
 - Modo `DRY_RUN` para simulación
+- ATR real basado en high/low/close
+- ADX suavizado estilo Wilder
+- Protección contra SHORT real accidental en Coinbase spot
+- Backend opcional: si `BACKEND_API_URL` está vacío, el bot no intenta postear
 
 ## Requisitos
 
@@ -23,6 +27,9 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
   - `PRODUCT_ID` (por defecto `BTC-USDC`)
   - `DRY_RUN` (`true` o `false`)
   - `USE_AI_ASSIST` (`true` o `false`)
+  - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)
+  - `RUN_ONCE` (`true` para smoke tests)
+  - `ALLOW_REAL_SPOT_SHORT` (mantener `false` en Coinbase spot)
 
 ## Instalación
 
@@ -36,7 +43,7 @@ pip install -r requirements.txt
 python3 btc_bot.py
 ```
 
-El bot valida la configuración y ejecuta el loop principal usando Telegram para alertas. En modo `DRY_RUN=true` solo simula órdenes.
+El bot valida la configuración y ejecuta el loop principal usando Telegram para alertas. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque Coinbase spot no abre posiciones cortas reales.
 
 ## Comandos de Telegram
 
@@ -87,4 +94,10 @@ Resumen:
 ```bash
 BACKEND_API_URL=http://localhost:8000/api   # local
 # BACKEND_API_URL=https://your-backend.railway.app/api   # producción
+```
+
+### Smoke test del bot
+
+```bash
+DRY_RUN=true USE_AI_ASSIST=false RUN_ONCE=true MIN_CONFIDENCE=1.1 python3 btc_bot.py
 ```
