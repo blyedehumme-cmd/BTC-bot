@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -14,7 +18,7 @@ class SignalCreate(SignalBase):
     market_condition: str = 'Pending'
     approved: bool = False
     explanation: str = 'Pending evaluation in paper trading mode.'
-    created_at: datetime | None = None
+    created_at: Optional[datetime] = None
 
 
 class SignalResponse(SignalBase):
@@ -34,8 +38,8 @@ class SignalResponse(SignalBase):
 class AiLogResponse(BaseModel):
     time: str
     message: str
-    severity: str | None = None
-    detail: str | None = None
+    severity: Optional[str] = None
+    detail: Optional[str] = None
 
 
 class AiStatusResponse(BaseModel):
@@ -52,9 +56,9 @@ class AiDecisionCreate(BaseModel):
     signal_id: int = 0
     decision_type: str
     reason: str
-    condition_snapshot: str | None = None
+    condition_snapshot: Optional[str] = None
     explanation: str
-    timestamp: datetime | None = None
+    timestamp: Optional[datetime] = None
 
 
 class AiDecisionResponse(BaseModel):
@@ -62,7 +66,7 @@ class AiDecisionResponse(BaseModel):
     signal_id: int
     decision_type: str
     reason: str
-    condition_snapshot: str | None = None
+    condition_snapshot: Optional[str] = None
     explanation: str
     timestamp: datetime
 
@@ -73,7 +77,7 @@ class AiDecisionResponse(BaseModel):
 
 class StrategyPerformanceResponse(BaseModel):
     total_trades: int
-    total_signals: int | None = None
+    total_signals: Optional[int] = None
     wins: int
     losses: int
     win_rate: int
@@ -97,16 +101,16 @@ class MarketLiveResponse(BaseModel):
 class PaperTradeBase(BaseModel):
     signal_id: int
     entry_price: float
-    stop_loss: float | None = None
-    take_profit: float | None = None
-    target_price: float | None = None
-    closed_price: float | None = None
-    result_pct: float | None = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    target_price: Optional[float] = None
+    closed_price: Optional[float] = None
+    result_pct: Optional[float] = None
     status: str
-    opened_at: datetime | None = None
-    closed_at: datetime | None = None
-    drawdown_pct: float | None = None
-    notes: str | None = None
+    opened_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    drawdown_pct: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class PaperTradeCreate(PaperTradeBase):

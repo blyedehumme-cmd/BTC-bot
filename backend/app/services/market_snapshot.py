@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 
 from app.services.live_market import fetch_live_market_data

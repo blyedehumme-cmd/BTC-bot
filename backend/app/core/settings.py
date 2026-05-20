@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import field_validator
@@ -67,7 +68,7 @@ class Settings(BaseSettings):
         return origins
 
     @property
-    def cors_origin_regex(self) -> str | None:
+    def cors_origin_regex(self) -> Optional[str]:
         if self.cors_allow_vercel_previews and self.is_production:
             return r'https://.*\.vercel\.app'
         return None
