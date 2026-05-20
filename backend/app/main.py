@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -31,7 +32,10 @@ app.include_router(api_router, prefix='/api')
 @app.on_event('startup')
 async def on_startup():
     logger.info('Starting Lesly backend (env=%s)', settings.environment)
-    await init_db()
+    try:
+        await asyncio.wait_for(init_db(), timeout=45)
+    except Exception:
+        logger.exception('Database initialization failed; starting API in degraded mode.')
     logger.info('CORS origins: %s', settings.cors_origin_list)
     if settings.cors_origin_regex:
         logger.info('CORS regex: %s', settings.cors_origin_regex)

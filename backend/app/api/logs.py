@@ -10,6 +10,7 @@ from app.services.log_service import get_ai_logs
 router = APIRouter()
 
 
+@router.get('', response_model=list[AiLogResponse])
 @router.get('/', response_model=list[AiLogResponse])
 async def list_logs(db: AsyncSession = Depends(get_db)):
     return await get_ai_logs(db)

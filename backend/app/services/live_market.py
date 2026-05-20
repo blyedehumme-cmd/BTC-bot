@@ -31,8 +31,8 @@ def _support_resistance_from_closes(closes: list[float], price: float) -> tuple[
         highest = max(closes)
         support = min(lowest, price * 0.995)
         resistance = max(highest, price * 1.005)
-        return support, resistance
-    return price * 0.995, price * 1.005
+        return round(support, 2), round(resistance, 2)
+    return round(price * 0.995, 2), round(price * 1.005, 2)
 
 
 def _coinbase_live_price() -> dict[str, object]:

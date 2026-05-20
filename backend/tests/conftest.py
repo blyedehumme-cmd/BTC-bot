@@ -2,10 +2,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services.db_init import init_db
 
 
 @pytest.fixture
 async def client():
+    await init_db()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url='http://test') as http_client:
         yield http_client
