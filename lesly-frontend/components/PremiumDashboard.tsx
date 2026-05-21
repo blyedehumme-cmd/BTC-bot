@@ -385,6 +385,11 @@ export default function PremiumDashboard() {
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
   const strategyChecks = decisionSnapshot?.strategy_checks ?? [];
   const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
+  const latestLog = aiLogs?.[0] ?? null;
+  const signalExplanation = activeSignal?.explanation
+    || latestLog?.detail
+    || latestLog?.message
+    || (blockedReasons.length ? `WAIT: ${blockedReasons.slice(0, 3).join(', ')}` : 'Esperando el próximo análisis del bot.');
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background text-slate-100">
@@ -477,7 +482,7 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Señal actual</h2><span className={signalTone(signal)}>{signal}</span></div>
               <div className={`rounded-3xl border p-5 ${signalTone(signal)}`}>
                 <p className="text-5xl font-black tracking-tight">{signal}</p>
-                <p className="mt-4 text-sm text-slate-300">{activeSignal?.explanation ?? 'Esperando explicación del backend.'}</p>
+                <p className="mt-4 text-sm text-slate-300">{signalExplanation}</p>
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                   <div><span className="text-slate-500">Entrada</span><p className="font-semibold text-white">{formatMoney(price)}</p></div>
                   <div><span className="text-slate-500">Confianza</span><p className="font-semibold text-emerald-300">{confidence}%</p></div>
