@@ -149,3 +149,11 @@ class MarketSnapshotResponse(BaseModel):
     model_config = {
         'from_attributes': True,
     }
+
+
+class BotControlResponse(BaseModel):
+    active: bool
+    mode: str
+    updated_at: str
+    updated_by: str
+    note: Optional[str] = None

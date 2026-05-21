@@ -1,4 +1,4 @@
-import { fetchJson } from './usePolling';
+import { fetchJson, postJson } from './usePolling';
 
 export type Signal = {
   id: number;
@@ -80,6 +80,14 @@ export type LiveMarket = {
   backend_connected: boolean;
 };
 
+export type BotControl = {
+  active: boolean;
+  mode: string;
+  updated_at: string;
+  updated_by: string;
+  note: string | null;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -87,3 +95,6 @@ export const fetchPerformance = () => fetchJson<Performance>('/ai/performance');
 export const fetchAiLogs = () => fetchJson<AiLog[]>('/logs');
 export const fetchAiStatus = () => fetchJson<AiStatus>('/ai/status');
 export const fetchLiveMarket = () => fetchJson<LiveMarket>('/market/live');
+export const fetchBotControl = () => fetchJson<BotControl>('/bot/status');
+export const startBot = () => postJson<BotControl>('/bot/start');
+export const stopBot = () => postJson<BotControl>('/bot/stop');

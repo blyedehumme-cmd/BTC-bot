@@ -99,3 +99,14 @@ class LearningNote(Base):
     observation = Column(Text, nullable=False)
     improvement_action = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False)
+
+
+class BotControl(Base):
+    __tablename__ = 'bot_control'
+
+    id = Column(Integer, primary_key=True, index=True)
+    active = Column(Boolean, nullable=False, default=True)
+    mode = Column(String(length=32), nullable=False, default='DRY_RUN')
+    updated_at = Column(DateTime, nullable=False)
+    updated_by = Column(String(length=64), nullable=False, default='dashboard')
+    note = Column(Text, nullable=True)

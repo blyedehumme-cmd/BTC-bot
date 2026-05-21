@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  fetchBotControl,
   fetchAiLogs,
   fetchAiStatus,
   fetchLiveMarket,
@@ -9,8 +10,11 @@ import {
   fetchPerformance,
   fetchSignals,
   fetchTrades,
+  startBot,
+  stopBot,
   type AiLog,
   type AiStatus,
+  type BotControl,
   type LiveMarket,
   type MarketSnapshot,
   type Performance,
@@ -152,7 +156,7 @@ function MetricCard({ label, value, sub, tone = 'cyan', values }: { label: strin
   );
 }
 
-function Sidebar() {
+function Sidebar({ botActive }: { botActive: boolean }) {
   return (
     <aside className="premium-card sticky top-4 hidden h-[calc(100vh-2rem)] w-[250px] shrink-0 overflow-hidden p-4 xl:block">
       <div className="mb-8 flex items-center gap-3 px-2 pt-2">
@@ -173,19 +177,19 @@ function Sidebar() {
           </a>
         ))}
       </nav>
-      <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300"><span className="h-3 w-3 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.9)]" /> BOT ACTIVO</div>
+      <div className={`absolute bottom-4 left-4 right-4 rounded-2xl border p-4 ${botActive ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-rose-400/20 bg-rose-500/10'}`}>
+        <div className={`flex items-center gap-2 text-sm font-semibold ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}><span className={`h-3 w-3 rounded-full ${botActive ? 'bg-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.9)]' : 'bg-rose-400 shadow-[0_0_18px_rgba(244,63,94,0.9)]'}`} /> {botActive ? 'BOT ACTIVO' : 'BOT PAUSADO'}</div>
         <p className="mt-2 text-xs text-slate-400">Modo papel · backend live</p>
       </div>
     </aside>
   );
 }
 
-function ControlButtons() {
+function ControlButtons({ botActive, busy, onStart, onStop }: { botActive: boolean; busy: boolean; onStart: () => void; onStop: () => void }) {
   return (
     <div className="premium-card grid h-full min-h-[118px] grid-cols-2 gap-3 p-4">
-      <button className="energy-button energy-start" type="button"><span>▶</span> START BOT</button>
-      <button className="energy-button energy-stop" type="button"><span>■</span> STOP BOT</button>
+      <button className={`energy-button energy-start ${botActive ? 'opacity-70' : ''}`} type="button" onClick={onStart} disabled={busy || botActive}><span>▶</span>{busy ? '...' : 'START BOT'}</button>
+      <button className={`energy-button energy-stop ${!botActive ? 'opacity-70' : ''}`} type="button" onClick={onStop} disabled={busy || !botActive}><span>■</span>{busy ? '...' : 'STOP BOT'}</button>
     </div>
   );
 }
@@ -220,6 +224,9 @@ function SystemStatus({ aiStatus }: { aiStatus: AiStatus | null }) {
 
 export default function PremiumDashboard() {
   const [timeframe, setTimeframe] = useState('1H');
+  const [botControl, setBotControl] = useState<BotControl | null>(null);
+  const [botActionBusy, setBotActionBusy] = useState(false);
+  const [botActionMessage, setBotActionMessage] = useState('');
   const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(), []), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
   const { data: signals } = usePolling<Signal[]>(useCallback(() => fetchSignals(), []), 4000);
@@ -227,6 +234,27 @@ export default function PremiumDashboard() {
   const { data: performance } = usePolling<Performance>(useCallback(() => fetchPerformance(), []), 6000);
   const { data: aiStatus } = usePolling<AiStatus>(useCallback(() => fetchAiStatus(), []), 5000);
   const { data: aiLogs } = usePolling<AiLog[]>(useCallback(() => fetchAiLogs(), []), 4500);
+  const { data: polledBotControl } = usePolling<BotControl>(useCallback(() => fetchBotControl(), []), 3000);
+
+  useEffect(() => {
+    if (polledBotControl) {
+      setBotControl(polledBotControl);
+    }
+  }, [polledBotControl]);
+
+  const runBotAction = useCallback(async (action: 'start' | 'stop') => {
+    setBotActionBusy(true);
+    setBotActionMessage(action === 'start' ? 'Activando bot...' : 'Pausando nuevas operaciones...');
+    try {
+      const next = action === 'start' ? await startBot() : await stopBot();
+      setBotControl(next);
+      setBotActionMessage(next.active ? 'Bot activo en modo papel.' : 'Bot pausado: no abrirá nuevas operaciones.');
+    } catch {
+      setBotActionMessage('No se pudo actualizar el bot. Revisa backend.');
+    } finally {
+      setBotActionBusy(false);
+    }
+  }, []);
 
   const snapshot = latest(snapshots);
   const activeSignal = latest(signals);
@@ -240,6 +268,7 @@ export default function PremiumDashboard() {
   const risk = activeSignal?.risk_level ?? aiStatus?.risk_level ?? 'Unknown';
   const pnl = recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
+  const botActive = botControl?.active ?? true;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background text-slate-100">
@@ -247,7 +276,7 @@ export default function PremiumDashboard() {
       <div className="energy-line energy-line-a" />
       <div className="energy-line energy-line-b" />
       <div className="relative z-10 flex gap-4 p-3 sm:p-4">
-        <Sidebar />
+        <Sidebar botActive={botActive} />
         <section className="min-w-0 flex-1 space-y-4">
           <header className="xl:hidden">
             <div className="premium-card flex items-center justify-between gap-4 p-4 xl:hidden">
@@ -255,7 +284,9 @@ export default function PremiumDashboard() {
                 <p className="text-2xl font-bold text-white">LESLY</p>
                 <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">AI Trading Bot</p>
               </div>
-              <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">Online</span>
+              <span className={`rounded-full border px-3 py-1 text-xs ${botActive ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-rose-400/30 bg-rose-400/10 text-rose-300'}`}>
+                {botActive ? 'Activo' : 'Pausado'}
+              </span>
             </div>
           </header>
 
@@ -264,7 +295,12 @@ export default function PremiumDashboard() {
             <MetricCard label="Equity" value={formatMoney(12845.3 + pnl)} sub={formatPct(performance?.average_return)} values={spark.slice().reverse()} tone="cyan" />
             <MetricCard label="P&L simulado" value={`${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`} sub="trades cerrados" values={recentTrades.map((trade, i) => (trade.result_pct ?? 0) + i + 8)} tone={pnl >= 0 ? 'green' : 'red'} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} values={[10, 14, 12, confidence || 20, 28, 34]} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} />
-            <ControlButtons />
+            <div className="space-y-2">
+              <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
+              <p className={`px-2 text-xs ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {botActionMessage || (botActive ? 'Bot activo: puede abrir operaciones paper.' : 'Bot pausado: no abrirá nuevas operaciones.')}
+              </p>
+            </div>
           </section>
 
           <section id="dashboard" className="grid gap-4 xl:grid-cols-[1.55fr_0.72fr_0.62fr]">

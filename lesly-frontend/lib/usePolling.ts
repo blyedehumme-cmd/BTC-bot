@@ -47,3 +47,15 @@ export async function fetchJson<T>(path: string): Promise<T> {
   }
   return response.json() as Promise<T>;
 }
+
+export async function postJson<T>(path: string, payload: unknown = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error('Backend offline');
+  }
+  return response.json() as Promise<T>;
+}

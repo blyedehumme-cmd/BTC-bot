@@ -328,8 +328,33 @@ def _post_json_to_backend(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _get_json_from_backend(path: str) -> Dict[str, Any]:
+    if not BACKEND_API_URL:
+        return {}
+    try:
+        response = requests.get(_backend_url(path), timeout=10)
+        response.raise_for_status()
+        return response.json() if response.content else {}
+    except requests.RequestException as exc:
+        logger.warning("backend_get_failed path=%s error=%s", path, exc)
+    except Exception as exc:
+        logger.warning("backend_get_unexpected path=%s error=%s", path, exc)
+    return {}
+
+
 async def post_json_to_backend(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return await asyncio.to_thread(lambda: _post_json_to_backend(path, payload))
+
+
+async def sync_bot_control_from_backend() -> None:
+    if not BACKEND_API_URL:
+        return
+    payload = await asyncio.to_thread(lambda: _get_json_from_backend("bot/status"))
+    active = payload.get("active") if isinstance(payload, dict) else None
+    if isinstance(active, bool) and state.active != active:
+        state.active = active
+        save_state()
+        logger.info("bot_control_synced active=%s source=backend mode=%s", active, payload.get("mode"))
 
 
 def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
@@ -1284,6 +1309,7 @@ async def trading_loop(app: Optional[Application]) -> None:
             price = float(analysis.get("price", 0.0))
             balance = simulated_equity(price) if DRY_RUN else get_usdc_balance()
             reset_daily_balance_if_needed(balance)
+            await sync_bot_control_from_backend()
 
             state.last_signal = analysis.get("signal", "WAIT")
             state.last_confidence = float(analysis.get("confidence", 0.0))
