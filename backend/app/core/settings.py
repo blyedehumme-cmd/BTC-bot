@@ -20,7 +20,12 @@ def normalize_database_url(url: str) -> tuple[str, bool]:
 
     parsed = urlparse(url)
     if parsed.query:
-        query = [(key, value) for key, value in parse_qsl(parsed.query) if key.lower() != 'sslmode']
+        asyncpg_unsupported_query_keys = {'sslmode', 'channel_binding'}
+        query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query)
+            if key.lower() not in asyncpg_unsupported_query_keys
+        ]
         url = urlunparse(parsed._replace(query=urlencode(query)))
 
     return url, ssl_required
