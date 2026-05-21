@@ -96,6 +96,59 @@ a {
   opacity: 0.42;
 }
 
+.metric-card .water-line {
+  position: absolute;
+  right: 1.35rem;
+  width: 8.5rem;
+  height: 1.25rem;
+  pointer-events: none;
+  opacity: 0.16;
+  filter: blur(0.2px) drop-shadow(0 0 8px currentColor);
+  transform-origin: center;
+}
+
+.metric-card .water-line::before,
+.metric-card .water-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 12% 50%, transparent 0 18%, currentColor 19% 24%, transparent 25%),
+    radial-gradient(ellipse at 38% 50%, transparent 0 18%, currentColor 19% 24%, transparent 25%),
+    radial-gradient(ellipse at 64% 50%, transparent 0 18%, currentColor 19% 24%, transparent 25%),
+    radial-gradient(ellipse at 90% 50%, transparent 0 18%, currentColor 19% 24%, transparent 25%);
+  background-size: 52px 100%;
+}
+
+.metric-card .water-line::after {
+  opacity: 0.55;
+  transform: translateX(18px) scaleY(0.72);
+}
+
+.metric-card .water-line-a {
+  top: 1.4rem;
+  animation: waterDrift 7.5s ease-in-out infinite;
+}
+
+.metric-card .water-line-b {
+  bottom: 1.55rem;
+  opacity: 0.09;
+  animation: waterDrift 9.5s ease-in-out infinite reverse;
+}
+
+.metric-card-green .water-line {
+  color: rgb(52 211 153);
+}
+
+.metric-card-cyan .water-line {
+  color: rgb(34 211 238);
+}
+
+.metric-card-red .water-line {
+  color: rgb(251 113 133);
+}
+
 .panel-label {
   font-size: 0.72rem;
   font-weight: 600;
@@ -244,6 +297,15 @@ a {
 @keyframes riseIn {
   from { opacity: 0; transform: translateY(12px) scaleY(0.92); }
   to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+@keyframes waterDrift {
+  0%, 100% {
+    transform: translate3d(-8px, 0, 0) scaleX(0.92) rotate(-1deg);
+  }
+  50% {
+    transform: translate3d(10px, 5px, 0) scaleX(1.04) rotate(1deg);
+  }
 }
 
 @media (max-width: 768px) {

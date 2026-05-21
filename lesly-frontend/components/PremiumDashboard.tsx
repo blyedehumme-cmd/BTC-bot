@@ -231,8 +231,10 @@ function MetricCard({
   const color = tone === 'green' ? 'text-emerald-300' : tone === 'red' ? 'text-rose-300' : 'text-cyan-300';
   const border = tone === 'green' ? 'border-emerald-400/25 bg-emerald-400/10' : tone === 'red' ? 'border-rose-400/25 bg-rose-400/10' : 'border-cyan-400/25 bg-cyan-400/10';
   return (
-    <article className="premium-card group min-h-[118px] p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/60 hover:shadow-[0_0_45px_rgba(0,157,255,0.22)]">
-      <div className="flex items-start justify-between gap-4">
+    <article className={`premium-card metric-card metric-card-${tone} group min-h-[118px] overflow-hidden p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/60 hover:shadow-[0_0_45px_rgba(0,157,255,0.22)]`}>
+      <div className="water-line water-line-a" />
+      <div className="water-line water-line-b" />
+      <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="panel-label">{label}</p>
           <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
