@@ -85,6 +85,8 @@ export type AiStatus = {
 
 export type LiveMarket = {
   symbol: string;
+  exchange?: string;
+  timeframe?: string;
   price: number;
   change_1h_pct: number;
   signal: string;
@@ -92,6 +94,18 @@ export type LiveMarket = {
   support: number;
   resistance: number;
   trend: string;
+  adx?: number;
+  atr?: number;
+  volume?: number;
+  volume_ratio?: number;
+  candles?: Array<{
+    time: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
   updated_at: string;
   backend_connected: boolean;
 };
@@ -110,7 +124,7 @@ export const fetchTrades = () => fetchJson<Trade[]>('/trades');
 export const fetchPerformance = () => fetchJson<Performance>('/ai/performance');
 export const fetchAiLogs = () => fetchJson<AiLog[]>('/logs');
 export const fetchAiStatus = () => fetchJson<AiStatus>('/ai/status');
-export const fetchLiveMarket = () => fetchJson<LiveMarket>('/market/live');
+export const fetchLiveMarket = (timeframe = '1H') => fetchJson<LiveMarket>(`/market/live?timeframe=${encodeURIComponent(timeframe)}`);
 export const fetchBotControl = () => fetchJson<BotControl>('/bot/status');
 export const startBot = () => postJson<BotControl>('/bot/start');
 export const stopBot = () => postJson<BotControl>('/bot/stop');

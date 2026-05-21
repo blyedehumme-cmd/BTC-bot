@@ -31,6 +31,7 @@ const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const paperStartingBalance = Number(process.env.NEXT_PUBLIC_PAPER_STARTING_BALANCE ?? 5000);
 
 type Candle = {
+  time?: string;
   open: number;
   close: number;
   high: number;
@@ -158,8 +159,25 @@ function MiniSparkline({ values, tone = 'cyan' }: { values: number[]; tone?: 'cy
   );
 }
 
-function CandleChart({ price, support, resistance, timeframe }: { price: number; support?: number; resistance?: number; timeframe: string }) {
-  const candles = useMemo(() => makeCandles(price, support, resistance, timeframe.length), [price, support, resistance, timeframe]);
+function CandleChart({
+  price,
+  support,
+  resistance,
+  timeframe,
+  candles: liveCandles,
+  exchange,
+}: {
+  price: number;
+  support?: number;
+  resistance?: number;
+  timeframe: string;
+  candles?: Candle[];
+  exchange?: string;
+}) {
+  const candles = useMemo(() => {
+    const clean = (liveCandles ?? []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value)));
+    return clean.length > 5 ? clean.slice(-54) : makeCandles(price, support, resistance, timeframe.length);
+  }, [liveCandles, price, support, resistance, timeframe]);
   const highs = candles.map((candle) => candle.high);
   const lows = candles.map((candle) => candle.low);
   const max = Math.max(...highs, price * 1.01);
@@ -174,7 +192,7 @@ function CandleChart({ price, support, resistance, timeframe }: { price: number;
           <p className="panel-label">BTC/USDT</p>
           <div className="mt-2 flex flex-wrap items-end gap-3">
             <p className="text-3xl font-semibold text-white sm:text-4xl">{formatMoney(price)}</p>
-            <span className="pb-1 text-sm font-semibold text-emerald-300">Live</span>
+            <span className="pb-1 text-sm font-semibold text-emerald-300">{exchange ? `${exchange.toUpperCase()} live` : 'Live'}</span>
           </div>
         </div>
         <div className="flex rounded-xl border border-cyan-400/20 bg-black/30 p-1">
@@ -188,7 +206,7 @@ function CandleChart({ price, support, resistance, timeframe }: { price: number;
       <div className="relative z-10 h-[250px]">
         {candles.map((candle, index) => {
           const up = candle.close >= candle.open;
-          const x = (index / candles.length) * 100;
+          const x = (index / Math.max(candles.length, 1)) * 100;
           const highTop = ((max - candle.high) / range) * 100;
           const lowTop = ((max - candle.low) / range) * 100;
           const openTop = ((max - candle.open) / range) * 100;
@@ -408,7 +426,7 @@ export default function PremiumDashboard() {
   const [botActionBusy, setBotActionBusy] = useState(false);
   const [botActionMessage, setBotActionMessage] = useState('');
   const liveNow = useLiveClock();
-  const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(), []), 3500);
+  const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe), [timeframe]), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
   const { data: signals } = usePolling<Signal[]>(useCallback(() => fetchSignals(), []), 4000);
   const { data: trades } = usePolling<Trade[]>(useCallback(() => fetchTrades(), []), 5000);
@@ -454,6 +472,21 @@ export default function PremiumDashboard() {
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
+  const liveCandles = useMemo(() => live?.candles?.map((candle) => ({
+    time: candle.time,
+    open: Number(candle.open),
+    high: Number(candle.high),
+    low: Number(candle.low),
+    close: Number(candle.close),
+    volume: Number(candle.volume),
+  })) ?? [], [live?.candles]);
+  const liveTelemetry = {
+    atr: decisionSnapshot?.atr ?? live?.atr,
+    adx: decisionSnapshot?.adx ?? live?.adx,
+    volumeRatio: decisionSnapshot?.volume_ratio ?? live?.volume_ratio,
+    volume: live?.volume,
+    volatilityRatio: decisionSnapshot?.volatility_ratio,
+  };
   const hasStrategySnapshot = Boolean(decisionSnapshot?.strategy_checks?.length);
   const strategyChecks = hasStrategySnapshot ? decisionSnapshot?.strategy_checks ?? [] : fallbackStrategyChecks({ live: live ?? null, snapshot, signal, confidence });
   const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
@@ -505,7 +538,7 @@ export default function PremiumDashboard() {
                   </button>
                 ))}
               </div>
-              <CandleChart price={price} support={support} resistance={resistance} timeframe={timeframe} />
+              <CandleChart price={price} support={support} resistance={resistance} timeframe={timeframe} candles={liveCandles} exchange={live?.exchange} />
             </div>
 
             <div className="premium-card p-5">
@@ -517,6 +550,7 @@ export default function PremiumDashboard() {
                   ['Soporte', formatMoney(support), 'text-cyan-300'],
                   ['Resistencia', formatMoney(resistance), 'text-rose-300'],
                   ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral', 'text-emerald-300'],
+                  ['Exchange', live?.exchange ? live.exchange.toUpperCase() : 'fallback', 'text-cyan-300'],
                 ].map(([label, value, className]) => (
                   <div key={label} className="flex items-center justify-between py-4 text-sm"><span className="text-slate-400">{label}</span><strong className={className}>{value}</strong></div>
                 ))}
@@ -532,10 +566,10 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Control de riesgo</h2><span>paper safe</span></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {[
-                  ['ATR real', decisionSnapshot?.atr ? number.format(decisionSnapshot.atr) : 'Pendiente bot', 'text-cyan-300'],
-                  ['ADX 1H', decisionSnapshot?.adx ? number.format(decisionSnapshot.adx) : 'Pendiente bot', 'text-emerald-300'],
-                  ['Volumen', decisionSnapshot?.volume_ratio ? `${decisionSnapshot.volume_ratio.toFixed(2)}x` : 'Pendiente bot', 'text-cyan-300'],
-                  ['Volatilidad', decisionSnapshot?.volatility_ratio ? `${decisionSnapshot.volatility_ratio.toFixed(2)} ATR` : 'Pendiente bot', 'text-amber-300'],
+                  ['ATR real', liveTelemetry.atr ? number.format(liveTelemetry.atr) : 'Esperando exchange', 'text-cyan-300'],
+                  [`ADX ${timeframe}`, liveTelemetry.adx ? number.format(liveTelemetry.adx) : 'Esperando exchange', 'text-emerald-300'],
+                  ['Volumen', liveTelemetry.volumeRatio ? `${liveTelemetry.volumeRatio.toFixed(2)}x` : 'Esperando exchange', 'text-cyan-300'],
+                  ['Volatilidad', liveTelemetry.volatilityRatio ? `${liveTelemetry.volatilityRatio.toFixed(2)} ATR` : liveTelemetry.volume ? number.format(liveTelemetry.volume) : 'Esperando exchange', 'text-amber-300'],
                 ].map(([label, value, className]) => (
                   <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>

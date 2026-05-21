@@ -91,6 +91,8 @@ class StrategyPerformanceResponse(BaseModel):
 
 class MarketLiveResponse(BaseModel):
     symbol: str
+    exchange: Optional[str] = None
+    timeframe: Optional[str] = None
     price: float
     change_1h_pct: float
     signal: str
@@ -98,6 +100,11 @@ class MarketLiveResponse(BaseModel):
     support: float
     resistance: float
     trend: str
+    adx: Optional[float] = None
+    atr: Optional[float] = None
+    volume: Optional[float] = None
+    volume_ratio: Optional[float] = None
+    candles: List[Dict[str, Any]] = Field(default_factory=list)
     updated_at: str
     backend_connected: bool
 

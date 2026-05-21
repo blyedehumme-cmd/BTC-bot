@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -12,8 +12,8 @@ router = APIRouter()
 
 
 @router.get('/live', response_model=MarketLiveResponse)
-async def list_market_live(db: AsyncSession = Depends(get_db)):
-    return await get_live_market_status(db)
+async def list_market_live(timeframe: str = Query('1H'), db: AsyncSession = Depends(get_db)):
+    return await get_live_market_status(db, timeframe=timeframe)
 
 
 @router.get('/snapshots', response_model=list[MarketSnapshotResponse])
