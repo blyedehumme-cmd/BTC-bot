@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timezone
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AiDecision
@@ -17,9 +19,14 @@ def _severity_for_decision(decision_type: str) -> str:
 
 
 def decision_to_log(decision: AiDecision) -> AiLogResponse:
-    timestamp = decision.timestamp.strftime('%H:%M')
+    timestamp_value = decision.timestamp
+    if timestamp_value.tzinfo is not None:
+        timestamp = timestamp_value.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+    else:
+        timestamp = timestamp_value.isoformat() + 'Z'
     return AiLogResponse(
-        time=timestamp,
+        time=timestamp_value.strftime('%H:%M'),
+        timestamp=timestamp,
         message=decision.reason,
         severity=_severity_for_decision(decision.decision_type),
         detail=decision.explanation,

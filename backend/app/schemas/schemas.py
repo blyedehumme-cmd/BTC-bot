@@ -37,6 +37,7 @@ class SignalResponse(SignalBase):
 
 class AiLogResponse(BaseModel):
     time: str
+    timestamp: Optional[str] = None
     message: str
     severity: Optional[str] = None
     detail: Optional[str] = None

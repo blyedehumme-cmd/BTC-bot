@@ -52,6 +52,7 @@ export type Performance = {
 
 export type AiLog = {
   time: string;
+  timestamp?: string;
   message: string;
   severity?: string;
   detail?: string;

@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { fetchAiLogs, type AiLog } from '../lib/pollingFetchers';
+import { formatNewYorkTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 export default function AiLogs() {
@@ -24,9 +25,9 @@ export default function AiLogs() {
           <p className="text-slate-400">No AI decisions logged yet. Start btc_bot.py to populate this feed.</p>
         )}
         {(logs ?? []).map((log, index) => (
-          <div key={`${log.time}-${index}`} className="rounded-3xl border border-slate-800 bg-[#07101d]/90 p-5 text-sm text-slate-300 shadow-inner">
+          <div key={`${log.timestamp ?? log.time}-${index}`} className="rounded-3xl border border-slate-800 bg-[#07101d]/90 p-5 text-sm text-slate-300 shadow-inner">
             <div className="flex items-center justify-between gap-4 text-slate-500">
-              <span>{log.time}</span>
+              <span>{formatNewYorkTime(log.timestamp ?? log.time)}</span>
               <span className="rounded-full bg-slate-900/70 px-3 py-1 text-xs uppercase tracking-[0.2em]">{log.severity ?? 'AI Log'}</span>
             </div>
             <p className="mt-3 text-slate-200">{log.message}</p>

@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { fetchMarketSnapshots, type MarketSnapshot } from '../lib/pollingFetchers';
+import { formatNewYorkTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 export default function MarketSnapshotPanel() {
@@ -46,7 +47,7 @@ export default function MarketSnapshotPanel() {
                 <p className="mt-2 text-xl font-semibold text-slate-100">${snapshot.resistance.toLocaleString()}</p>
               </div>
             </div>
-            <p className="mt-4 text-sm text-slate-400">Updated at {new Date(snapshot.updated_at).toLocaleTimeString()}</p>
+            <p className="mt-4 text-sm text-slate-400">Updated at {formatNewYorkTime(snapshot.updated_at)}</p>
           </div>
         ))}
       </div>

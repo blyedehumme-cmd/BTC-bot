@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { fetchAiStatus, type AiStatus } from '../lib/pollingFetchers';
+import { formatNewYorkDateTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 export default function AiStatusPanel() {
@@ -48,7 +49,7 @@ export default function AiStatusPanel() {
             </div>
             <div className="rounded-3xl border border-slate-800 bg-[#091229]/90 p-5">
               <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Last Analysis</p>
-              <p className="mt-2 text-white">{new Date(status.last_analysis_time).toLocaleString()}</p>
+              <p className="mt-2 text-white">{formatNewYorkDateTime(status.last_analysis_time)}</p>
             </div>
           </div>
         )}

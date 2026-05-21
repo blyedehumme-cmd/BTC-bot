@@ -21,6 +21,7 @@ import {
   type Signal,
   type Trade,
 } from '../lib/pollingFetchers';
+import { formatNewYorkDateTime, formatNewYorkTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 const navItems = ['Dashboard', 'Señales', 'Operaciones', 'Backtesting', 'Riesgo', 'Configuración', 'IA análisis', 'Historial', 'IA chat'];
@@ -316,7 +317,7 @@ export default function PremiumDashboard() {
             </div>
 
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Snapshot de mercado</h2><span>Live</span></div>
+              <div className="panel-head"><h2>Snapshot de mercado</h2><span>{formatNewYorkTime(live?.updated_at ?? snapshot?.updated_at)}</span></div>
               <div className="divide-y divide-cyan-400/10">
                 {[
                   ['Precio BTC', formatMoney(price), 'text-emerald-300'],
@@ -367,7 +368,7 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Últimas señales cerradas</h2><span>{closedSignals.length}</span></div>
               <div className="space-y-3">
                 {closedSignals.length === 0 && <p className="text-sm text-slate-500">Sin señales cerradas todavía.</p>}
-                {closedSignals.map((item) => <div key={item.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className={item.direction === 'SHORT' ? 'text-rose-300' : item.direction === 'LONG' ? 'text-emerald-300' : 'text-cyan-300'}>{item.direction}</span><span className="text-slate-400">{item.confidence_score}%</span><span className="text-slate-500">{new Date(item.created_at).toLocaleDateString()}</span></div>)}
+                {closedSignals.map((item) => <div key={item.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className={item.direction === 'SHORT' ? 'text-rose-300' : item.direction === 'LONG' ? 'text-emerald-300' : 'text-cyan-300'}>{item.direction}</span><span className="text-slate-400">{item.confidence_score}%</span><span className="text-slate-500">{formatNewYorkDateTime(item.created_at)}</span></div>)}
               </div>
             </div>
           </section>
@@ -382,6 +383,7 @@ export default function PremiumDashboard() {
                   ['Temporalidad dominante', timeframe],
                   ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
                   ['Validación IA', aiStatus?.mode ?? 'paper'],
+                  ['Último análisis', formatNewYorkDateTime(aiStatus?.last_analysis_time)],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className="mt-1 font-semibold text-white">{value}</p></div>
                 ))}
@@ -390,7 +392,7 @@ export default function PremiumDashboard() {
             <div className="premium-card p-5">
               <div className="panel-head"><h2>IA chat</h2><span>decision stream</span></div>
               <div className="space-y-3">
-                {(aiLogs ?? []).slice(-6).reverse().map((log, index) => <div key={`${log.time}-${index}`} className="ai-bubble"><p className="text-xs text-cyan-300">{log.time} · {log.severity ?? 'AI'}</p><p className="mt-1 text-sm text-slate-200">{log.message}</p>{log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}</div>)}
+                {(aiLogs ?? []).slice(-6).reverse().map((log, index) => <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble"><p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'AI'}</p><p className="mt-1 text-sm text-slate-200">{log.message}</p>{log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}</div>)}
                 {(aiLogs ?? []).length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando mensajes del motor IA y decisiones del bot.</p></div>}
               </div>
             </div>
@@ -398,7 +400,7 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Últimas operaciones</h2><span>{recentTrades.length}</span></div>
               <div className="space-y-3">
                 {recentTrades.length === 0 && <p className="text-sm text-slate-500">Sin operaciones cerradas todavía.</p>}
-                {recentTrades.map((trade) => <div key={trade.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className="text-slate-300">#{trade.id}</span><span>{formatMoney(trade.entry_price)}</span><span className={(trade.result_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatPct(trade.result_pct)}</span></div>)}
+                {recentTrades.map((trade) => <div key={trade.id} className="grid gap-1 rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm sm:grid-cols-[auto_1fr_auto_auto] sm:items-center"><span className="text-slate-300">#{trade.id}</span><span className="text-slate-500 sm:text-center">{formatNewYorkDateTime(trade.closed_at ?? trade.opened_at)}</span><span className="text-slate-300">{formatMoney(trade.entry_price)}</span><span className={(trade.result_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatPct(trade.result_pct)}</span></div>)}
               </div>
             </div>
           </section>

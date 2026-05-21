@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { fetchTrades, type Trade } from '../lib/pollingFetchers';
+import { formatNewYorkDateTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 export default function TradeHistoryPanel() {
@@ -26,7 +27,7 @@ export default function TradeHistoryPanel() {
             <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
               <span>Trade #{trade.id}</span>
               <span>{trade.status}</span>
-              <span>{new Date(trade.closed_at ?? trade.opened_at).toLocaleString()}</span>
+              <span>{formatNewYorkDateTime(trade.closed_at ?? trade.opened_at)}</span>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-3xl bg-[#06131f]/90 p-4">
