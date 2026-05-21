@@ -366,13 +366,22 @@ function StrategyMatrix({ checks, blockedReasons }: { checks: StrategyCheck[]; b
 
 function EquityPanel({ performance }: { performance: Performance | null }) {
   const curve = performance?.equity_curve ?? [];
-  const values = curve.length > 1 ? curve.map((point) => point.equity) : [0, performance?.average_return ?? 0, performance?.win_rate ?? 0];
+  const values = curve.map((point) => point.equity);
   const monthly = performance?.monthly_stats ?? [];
   return (
     <div className="premium-card p-5">
       <div className="panel-head"><h2>Equity curve</h2><span>{curve.length} cierres</span></div>
       <div className="h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
-        <MiniSparkline values={values} tone={(values.at(-1) ?? 0) >= 0 ? 'green' : 'red'} />
+        {values.length > 1 ? (
+          <MiniSparkline values={values} tone={(values.at(-1) ?? 0) >= 0 ? 'green' : 'red'} />
+        ) : (
+          <div className="grid h-full place-items-center text-center">
+            <div>
+              <p className="text-sm font-semibold text-slate-300">Sin curva todavía</p>
+              <p className="mt-1 text-xs text-slate-500">Aparecerá cuando cierre la primera operación paper.</p>
+            </div>
+          </div>
+        )}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Profit factor proxy</p><p className="mt-2 text-xl font-semibold text-cyan-200">{performance?.wins && performance?.losses ? (performance.wins / Math.max(performance.losses, 1)).toFixed(2) : '—'}</p></div>
@@ -567,7 +576,18 @@ export default function PremiumDashboard() {
                   ['Avg return', `${performance?.average_return ?? 0}%`, 'text-cyan-300'],
                 ].map(([label, value, className]) => <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p></div>)}
               </div>
-              <div className="mt-5 h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><MiniSparkline values={(performance?.equity_curve?.length ? performance.equity_curve.map((point) => point.equity) : [2, 4, 3, 8, 7, 12, 10, 16, 15, 20])} tone="green" /></div>
+              <div className="mt-5 h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                {performance?.equity_curve?.length && performance.equity_curve.length > 1 ? (
+                  <MiniSparkline values={performance.equity_curve.map((point) => point.equity)} tone="green" />
+                ) : (
+                  <div className="grid h-full place-items-center text-center">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-300">Esperando trades cerrados</p>
+                      <p className="mt-1 text-xs text-slate-500">Aquí irá la curva real del paper trading.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="premium-card p-5">
