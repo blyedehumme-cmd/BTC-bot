@@ -88,6 +88,35 @@ function parseDecisionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
   }
 }
 
+function fallbackStrategyChecks(params: { live: LiveMarket | null; snapshot: MarketSnapshot | null; signal: string; confidence: number }): StrategyCheck[] {
+  return [
+    {
+      label: 'Snapshot',
+      status: params.live || params.snapshot ? 'pending' : 'block',
+      value: params.live || params.snapshot ? 'Mercado conectado' : 'Sin datos',
+      detail: params.live || params.snapshot ? 'Esperando matriz detallada del próximo ciclo del bot.' : 'Backend sin snapshot de mercado todavía.',
+    },
+    {
+      label: 'Señal',
+      status: 'pending',
+      value: params.signal,
+      detail: `Última señal visible con confianza ${params.confidence}%.`,
+    },
+    {
+      label: 'Tendencia',
+      status: 'pending',
+      value: params.live?.trend ?? params.snapshot?.trend ?? 'Pendiente',
+      detail: 'Dato live disponible; confirmaciones 1D/4H/1H llegan desde el worker.',
+    },
+    {
+      label: 'Riesgo',
+      status: 'pending',
+      value: 'Pendiente bot',
+      detail: 'ATR, ADX, volumen y volatilidad se llenan cuando btc_bot.py publique condition_snapshot.',
+    },
+  ];
+}
+
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date());
 
@@ -271,18 +300,25 @@ function SystemStatus({ aiStatus }: { aiStatus: AiStatus | null }) {
 }
 
 function StrategyMatrix({ checks, blockedReasons }: { checks: StrategyCheck[]; blockedReasons: string[] }) {
+  const pending = checks.some((check) => check.status === 'pending');
   return (
     <div className="premium-card p-5">
-      <div className="panel-head"><h2>Matriz swing</h2><span>{blockedReasons.length ? 'WAIT' : 'alineado'}</span></div>
+      <div className="panel-head"><h2>Matriz swing</h2><span>{blockedReasons.length ? 'WAIT' : pending ? 'pendiente' : 'alineado'}</span></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {checks.length === 0 && <p className="text-sm text-slate-500">Esperando snapshot de estrategia del bot.</p>}
         {checks.map((check, index) => {
           const ok = check.status === 'ok';
+          const isPending = check.status === 'pending';
+          const tone = ok
+            ? 'border-emerald-400/20 bg-emerald-500/10'
+            : isPending
+              ? 'border-cyan-400/20 bg-cyan-500/10'
+              : 'border-rose-400/20 bg-rose-500/10';
           return (
-            <div key={`${check.label}-${index}`} className={`rounded-2xl border p-3 ${ok ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-rose-400/20 bg-rose-500/10'}`}>
+            <div key={`${check.label}-${index}`} className={`rounded-2xl border p-3 ${tone}`}>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{check.label}</p>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ok ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'}`}>{ok ? 'OK' : 'BLOQUEA'}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ok ? 'bg-emerald-400/15 text-emerald-300' : isPending ? 'bg-cyan-400/15 text-cyan-300' : 'bg-rose-400/15 text-rose-300'}`}>{ok ? 'OK' : isPending ? 'PENDIENTE' : 'BLOQUEA'}</span>
               </div>
               <p className="mt-2 text-sm font-semibold text-white">{String(check.value ?? check.detail ?? '—')}</p>
               {check.detail && <p className="mt-1 text-xs text-slate-500">{check.detail}</p>}
@@ -383,7 +419,8 @@ export default function PremiumDashboard() {
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
-  const strategyChecks = decisionSnapshot?.strategy_checks ?? [];
+  const hasStrategySnapshot = Boolean(decisionSnapshot?.strategy_checks?.length);
+  const strategyChecks = hasStrategySnapshot ? decisionSnapshot?.strategy_checks ?? [] : fallbackStrategyChecks({ live: live ?? null, snapshot, signal, confidence });
   const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
   const latestLog = aiLogs?.[0] ?? null;
   const signalExplanation = activeSignal?.explanation
@@ -460,10 +497,10 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Control de riesgo</h2><span>paper safe</span></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {[
-                  ['ATR real', decisionSnapshot?.atr ? number.format(decisionSnapshot.atr) : '—', 'text-cyan-300'],
-                  ['ADX 1H', decisionSnapshot?.adx ? number.format(decisionSnapshot.adx) : '—', 'text-emerald-300'],
-                  ['Volumen', decisionSnapshot?.volume_ratio ? `${decisionSnapshot.volume_ratio.toFixed(2)}x` : '—', 'text-cyan-300'],
-                  ['Volatilidad', decisionSnapshot?.volatility_ratio ? `${decisionSnapshot.volatility_ratio.toFixed(2)} ATR` : '—', 'text-amber-300'],
+                  ['ATR real', decisionSnapshot?.atr ? number.format(decisionSnapshot.atr) : 'Pendiente bot', 'text-cyan-300'],
+                  ['ADX 1H', decisionSnapshot?.adx ? number.format(decisionSnapshot.adx) : 'Pendiente bot', 'text-emerald-300'],
+                  ['Volumen', decisionSnapshot?.volume_ratio ? `${decisionSnapshot.volume_ratio.toFixed(2)}x` : 'Pendiente bot', 'text-cyan-300'],
+                  ['Volatilidad', decisionSnapshot?.volatility_ratio ? `${decisionSnapshot.volatility_ratio.toFixed(2)} ATR` : 'Pendiente bot', 'text-amber-300'],
                 ].map(([label, value, className]) => (
                   <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
