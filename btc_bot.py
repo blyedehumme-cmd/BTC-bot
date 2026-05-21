@@ -85,8 +85,8 @@ MACD_FAST = 21
 MACD_SLOW = 50
 MACD_SIGNAL = 10
 ADX_PERIOD = 14
-ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "23.0"))
-VOLUME_HEALTH_MIN = 0.75
+ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "20.0"))
+VOLUME_HEALTH_MIN = float(os.getenv("VOLUME_HEALTH_MIN", "0.65"))
 AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
 MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
 
@@ -1356,6 +1356,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"ALLOW_SHORT_SIGNALS: {ALLOW_SHORT_SIGNALS}\n"
         f"USE_CLOSED_CANDLES: {USE_CLOSED_CANDLES}\n"
         f"IA asistida: {USE_AI_ASSIST}\n"
+        f"ADX threshold: {ADX_THRESHOLD:.2f}\n"
+        f"Volumen minimo: {VOLUME_HEALTH_MIN:.2f}x\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"

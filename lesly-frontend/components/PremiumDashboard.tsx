@@ -642,10 +642,17 @@ export default function PremiumDashboard() {
               </div>
             </div>
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>IA chat</h2><span>decision stream</span></div>
+              <div className="panel-head"><h2>Eventos del backend</h2><span>{(aiLogs ?? []).length} logs</span></div>
               <div className="space-y-3">
-                {(aiLogs ?? []).slice(0, 6).map((log, index) => <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble"><p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'AI'}</p><p className="mt-1 text-sm text-slate-200">{log.message}</p>{log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}</div>)}
-                {(aiLogs ?? []).length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando mensajes del motor IA y decisiones del bot.</p></div>}
+                {(aiLogs ?? []).slice(0, 6).map((log, index) => (
+                  <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble">
+                    <p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'BACKEND'}</p>
+                    <p className="mt-1 text-sm text-slate-200">{log.message}</p>
+                    {log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}
+                    {log.condition_snapshot && <p className="mt-2 inline-flex rounded-full border border-cyan-400/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-cyan-300">Snapshot estrategia recibido</p>}
+                  </div>
+                ))}
+                {(aiLogs ?? []).length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando eventos del backend y decisiones del bot.</p></div>}
               </div>
             </div>
             <div className="premium-card p-5">
