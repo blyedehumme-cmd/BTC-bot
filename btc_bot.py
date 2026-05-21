@@ -70,6 +70,7 @@ MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "60"))
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
 ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
@@ -188,6 +189,7 @@ class BotState:
     last_reason: str = "Sin analisis todavia."
     stats: TradeStats = field(default_factory=TradeStats)
     trade_history: List[Dict[str, Any]] = field(default_factory=list)
+    positions: List[Dict[str, Any]] = field(default_factory=list)
     daily_trades: int = 0
 
 
@@ -252,11 +254,83 @@ def load_state() -> None:
                 worst_trade=float(stats.get("worst_trade", 0.0)),
             ),
             trade_history=list(data.get("trade_history", [])),
+            positions=list(data.get("positions", [])),
             daily_trades=int(data.get("daily_trades", 0)),
         )
+        if state.position_open and not state.positions:
+            state.positions = [position_from_state()]
+        sync_primary_position()
         logger.info("state_loaded file=%s position_open=%s", STATE_FILE, state.position_open)
     except Exception as exc:
         logger.error("state_load_failed error=%s", exc)
+
+
+def position_from_state() -> Dict[str, Any]:
+    return {
+        "symbol": state.position_symbol,
+        "side": state.side,
+        "entry_price": state.entry_price,
+        "position_size_btc": state.position_size_btc,
+        "position_usd": state.position_usd,
+        "stop_loss": state.stop_loss,
+        "initial_stop_loss": state.initial_stop_loss,
+        "take_profit": state.take_profit,
+        "highest_price": state.highest_price,
+        "lowest_price": state.lowest_price,
+        "last_trade_ts": state.last_trade_ts,
+        "last_confidence": state.last_confidence,
+        "last_reason": state.last_reason,
+    }
+
+
+def set_state_from_position(position: Dict[str, Any]) -> None:
+    state.position_open = True
+    state.position_symbol = str(position.get("symbol", WATCHLIST[0])).upper()
+    state.side = position.get("side")
+    state.entry_price = float(position.get("entry_price", 0.0))
+    state.position_size_btc = float(position.get("position_size_btc", 0.0))
+    state.position_usd = float(position.get("position_usd", 0.0))
+    state.stop_loss = float(position.get("stop_loss", 0.0))
+    state.initial_stop_loss = float(position.get("initial_stop_loss", 0.0))
+    state.take_profit = float(position.get("take_profit", 0.0))
+    state.highest_price = float(position.get("highest_price", 0.0))
+    state.lowest_price = float(position.get("lowest_price", 0.0))
+    state.last_trade_ts = float(position.get("last_trade_ts", 0.0))
+    state.last_confidence = float(position.get("last_confidence", state.last_confidence))
+    state.last_reason = str(position.get("last_reason", state.last_reason))
+
+
+def sync_position_from_state(position: Dict[str, Any]) -> Dict[str, Any]:
+    position.update(position_from_state())
+    return position
+
+
+def active_positions() -> List[Dict[str, Any]]:
+    state.positions = [pos for pos in state.positions if pos.get("side") in ["LONG", "SHORT"]]
+    return state.positions
+
+
+def sync_primary_position() -> None:
+    positions = active_positions()
+    if positions:
+        set_state_from_position(positions[0])
+        state.position_open = True
+        return
+    state.position_open = False
+    state.side = None
+    state.position_symbol = WATCHLIST[0]
+    state.entry_price = 0.0
+    state.position_size_btc = 0.0
+    state.position_usd = 0.0
+    state.stop_loss = 0.0
+    state.initial_stop_loss = 0.0
+    state.take_profit = 0.0
+    state.highest_price = 0.0
+    state.lowest_price = 0.0
+
+
+def open_position_symbols() -> set[str]:
+    return {str(position.get("symbol", "")).upper() for position in active_positions()}
 
 
 # =========================
@@ -1288,9 +1362,11 @@ def simulated_equity(price: float) -> float:
     return DRY_RUN_BALANCE + state.stats.simulated_pnl_usd + unrealized_pnl(price)
 
 
-def can_trade_now() -> bool:
-    if not state.active or state.position_open:
+def can_trade_now(ignore_interval: bool = False) -> bool:
+    if not state.active or len(active_positions()) >= MAX_OPEN_POSITIONS:
         return False
+    if ignore_interval:
+        return True
     if state.last_trade_ts == 0:
         return True
     return (time.time() - state.last_trade_ts) >= MIN_MINUTES_BETWEEN_TRADES * 60
@@ -1330,7 +1406,6 @@ def calculate_position_size(balance: float, price: float, atr_val: float) -> flo
 def record_trade_pnl(exit_price: float) -> float:
     pnl = unrealized_pnl(exit_price)
     state.stats.total_trades += 1
-    state.daily_trades += 1
     if pnl >= 0:
         state.stats.wins += 1
     else:
@@ -1376,7 +1451,10 @@ def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
 
 
 def close_position_state() -> None:
-    state.position_open = False
+    state.positions = [pos for pos in state.positions if str(pos.get("symbol", "")).upper() != state.position_symbol]
+    sync_primary_position()
+    if state.position_open:
+        return
     state.side = None
     state.position_symbol = WATCHLIST[0]
     state.entry_price = 0.0
@@ -1431,7 +1509,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Exchange: {EXCHANGE}\n"
         f"Watchlist: {', '.join(WATCHLIST)}\n"
         f"Producto: {selected_symbol(state.position_symbol)}\n"
-        f"Posicion abierta: {state.position_open}\n"
+        f"Posiciones abiertas: {len(active_positions())}/{MAX_OPEN_POSITIONS}\n"
         f"Simbolo posicion: {state.position_symbol}\n"
         f"Side: {state.side}\n"
         f"Entrada: {state.entry_price:.2f}\n"
@@ -1463,6 +1541,7 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"
         f"Max trades por dia: {MAX_TRADES_PER_DAY}\n"
+        f"Max posiciones abiertas: {MAX_OPEN_POSITIONS}\n"
         f"SL ATR: {ATR_STOP_MULTIPLIER:.2f}x\n"
         f"TP ATR: {ATR_TAKE_PROFIT_MULTIPLIER:.2f}x\n"
         f"Trailing ATR: {ATR_TRAILING_MULTIPLIER:.2f}x"
@@ -1492,6 +1571,114 @@ async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str, Any]]:
+    analyses: List[Dict[str, Any]] = []
+    kept_positions: List[Dict[str, Any]] = []
+    for position in list(active_positions()):
+        set_state_from_position(position)
+        analysis = analyze_market(state.position_symbol)
+        analyses.append(analysis)
+        price = float(analysis.get("price", 0.0))
+        exit_reason = manage_open_position(price, analysis.get("hourly", {}))
+        if exit_reason:
+            order_side = "SELL" if state.side == "LONG" else "BUY"
+            place_market_order(
+                order_side,
+                base_size=state.position_size_btc if state.side == "LONG" else None,
+                quote_size=None if state.side == "LONG" else state.position_usd,
+            )
+            pnl = record_trade_pnl(price)
+            await send_trade_to_backend(price, pnl)
+            win_rate = (state.stats.wins / state.stats.total_trades * 100) if state.stats.total_trades else 0
+            await send_telegram(
+                app,
+                f"{state.position_symbol} trade {'ganado' if pnl >= 0 else 'perdido'}\n"
+                f"Resultado: ${pnl:.2f}\n"
+                f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
+                f"Win Rate: {win_rate:.2f}%\n"
+                f"Salida: {exit_reason}\n"
+                f"Precio salida: {price:.2f}\n"
+                f"Entrada: {state.entry_price:.2f}\n"
+                f"Size: {state.position_size_btc:.8f}",
+            )
+        else:
+            kept_positions.append(sync_position_from_state(position))
+    state.positions = kept_positions
+    sync_primary_position()
+    save_state()
+    return analyses
+
+
+async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, app: Optional[Application]) -> bool:
+    if analysis.get("signal") not in ["LONG", "SHORT"]:
+        return False
+    symbol = str(analysis.get("symbol", WATCHLIST[0])).upper()
+    if symbol in open_position_symbols():
+        return False
+    if len(active_positions()) >= MAX_OPEN_POSITIONS:
+        return False
+    if not can_trade_now(ignore_interval=len(active_positions()) > 0):
+        return False
+    if not DRY_RUN and analysis.get("signal") == "SHORT" and not ALLOW_REAL_SPOT_SHORT:
+        logger.warning("blocked_real_short exchange=%s symbol=%s", EXCHANGE, selected_symbol(symbol))
+        await send_telegram(app, "Senal SHORT bloqueada: spot no abre short real sin margin/futures.")
+        return False
+    if state.daily_trades >= MAX_TRADES_PER_DAY:
+        logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
+        return False
+
+    price = float(analysis.get("price", 0.0))
+    atr_used = float(analysis.get("atr", 0.0)) or float(analysis.get("hourly", {}).get("atr", 0.0))
+    size = calculate_position_size(balance, price, atr_used)
+    usd_size = size * price
+    if usd_size < MIN_ORDER_USD:
+        logger.info("position_size_below_min symbol=%s usd_size=%.2f min=%.2f", symbol, usd_size, MIN_ORDER_USD)
+        return False
+
+    side = str(analysis["signal"])
+    if side == "LONG":
+        stop = price - atr_used * ATR_STOP_MULTIPLIER
+        take = price + atr_used * ATR_TAKE_PROFIT_MULTIPLIER
+        order_side = "BUY"
+    else:
+        stop = price + atr_used * ATR_STOP_MULTIPLIER
+        take = price - atr_used * ATR_TAKE_PROFIT_MULTIPLIER
+        order_side = "SELL"
+
+    state.position_symbol = symbol
+    place_market_order(order_side, quote_size=usd_size if order_side == "BUY" else None, base_size=size)
+    opened_at = time.time()
+    position = {
+        "symbol": symbol,
+        "side": side,
+        "entry_price": price,
+        "position_size_btc": size,
+        "position_usd": usd_size,
+        "stop_loss": stop,
+        "initial_stop_loss": stop,
+        "take_profit": take,
+        "highest_price": price,
+        "lowest_price": price,
+        "last_trade_ts": opened_at,
+        "last_confidence": float(analysis.get("confidence", 0.0)),
+        "last_reason": str(analysis.get("reason", "")),
+    }
+    state.positions.append(position)
+    state.daily_trades += 1
+    state.last_trade_ts = opened_at
+    set_state_from_position(position)
+    save_state()
+    logger.info("position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f stop=%.2f take=%.2f open_positions=%s", symbol, side, price, usd_size, size, stop, take, len(active_positions()))
+    await send_telegram(
+        app,
+        f"{symbol} {'Compra' if side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
+        f"Precio: {price:.2f}\nUSD: {usd_size:.2f}\nSize: {size:.8f}\n"
+        f"Stop: {stop:.2f}\nTake Profit: {take:.2f}\nATR usado: {atr_used:.2f}\n"
+        f"Confianza: {float(analysis.get('confidence', 0.0)):.2f}\nRazon: {analysis.get('reason', '')}",
+    )
+    return True
+
+
 # =========================
 # LOOP PRINCIPAL
 # =========================
@@ -1500,14 +1687,14 @@ async def trading_loop(app: Optional[Application]) -> None:
     await send_telegram(app, f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Exchange={EXCHANGE} Producto={selected_symbol()}")
     while True:
         try:
-            if state.position_open:
-                analysis = analyze_market(state.position_symbol)
-                analyses = [analysis]
-            else:
-                analyses = analyze_watchlist()
-                analysis = choose_trade_analysis(analyses)
+            managed_analyses = await manage_existing_positions(app)
+            open_symbols = open_position_symbols()
+            scan_symbols = [symbol for symbol in WATCHLIST if symbol not in open_symbols]
+            scan_analyses = [analyze_market(symbol) for symbol in scan_symbols] if len(open_symbols) < MAX_OPEN_POSITIONS else []
+            analyses = managed_analyses + scan_analyses
+            analysis = choose_trade_analysis(analyses)
             price = float(analysis.get("price", 0.0))
-            balance = simulated_equity(price) if DRY_RUN else get_usdc_balance()
+            balance = DRY_RUN_BALANCE + state.stats.simulated_pnl_usd if DRY_RUN else get_usdc_balance()
             reset_daily_balance_if_needed(balance)
             await sync_bot_control_from_backend()
 
@@ -1529,87 +1716,24 @@ async def trading_loop(app: Optional[Application]) -> None:
                 state.last_signal,
                 state.last_confidence,
                 balance,
-                state.position_open,
+                len(active_positions()) > 0,
             )
             logger.info("cycle_reason %s", state.last_reason)
             ordered_analyses = [item for item in analyses if item is not analysis] + [analysis]
             await publish_analyses_to_backend(ordered_analyses)
 
-            if state.position_open:
-                exit_reason = manage_open_position(price, analysis.get("hourly", {}))
-                save_state()
-                if exit_reason:
-                    order_side = "SELL" if state.side == "LONG" else "BUY"
-                    place_market_order(
-                        order_side,
-                        base_size=state.position_size_btc if state.side == "LONG" else None,
-                        quote_size=None if state.side == "LONG" else state.position_usd,
-                    )
-                    pnl = record_trade_pnl(price)
-                    await send_trade_to_backend(price, pnl)
-                    win_rate = (state.stats.wins / state.stats.total_trades * 100) if state.stats.total_trades else 0
-                    await send_telegram(
-                        app,
-                        f"Trade {'ganado' if pnl >= 0 else 'perdido'}\n"
-                        f"Resultado: ${pnl:.2f}\n"
-                        f"PnL acumulado: ${state.stats.simulated_pnl_usd:.2f}\n"
-                        f"Win Rate: {win_rate:.2f}%\n"
-                        f"Salida: {exit_reason}\n"
-                        f"Precio salida: {price:.2f}\n"
-                        f"Entrada: {state.entry_price:.2f}\n"
-                        f"BTC: {state.position_size_btc:.8f}",
-                    )
-                    close_position_state()
-                    save_state()
-
-            elif can_trade_now() and state.last_signal in ["LONG", "SHORT"]:
-                if not DRY_RUN and state.last_signal == "SHORT" and not ALLOW_REAL_SPOT_SHORT:
-                    logger.warning("blocked_real_short exchange=%s symbol=%s", EXCHANGE, selected_symbol(str(analysis.get("symbol", WATCHLIST[0]))))
-                    await send_telegram(app, "Senal SHORT bloqueada: spot no abre short real sin margin/futures.")
-                elif state.daily_trades >= MAX_TRADES_PER_DAY:
+            actionable = sorted(
+                [item for item in scan_analyses if item.get("signal") in ["LONG", "SHORT"]],
+                key=lambda item: float(item.get("confidence", 0.0)),
+                reverse=True,
+            )
+            for candidate in actionable:
+                if len(active_positions()) >= MAX_OPEN_POSITIONS:
+                    break
+                if state.daily_trades >= MAX_TRADES_PER_DAY:
                     logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
-                else:
-                    atr_used = float(analysis.get("atr", 0.0)) or float(analysis.get("hourly", {}).get("atr", 0.0))
-                    btc_size = calculate_position_size(balance, price, atr_used)
-                    usd_size = btc_size * price
-                    if usd_size >= MIN_ORDER_USD:
-                        if state.last_signal == "LONG":
-                            stop = price - atr_used * ATR_STOP_MULTIPLIER
-                            take = price + atr_used * ATR_TAKE_PROFIT_MULTIPLIER
-                            order_side = "BUY"
-                        else:
-                            stop = price + atr_used * ATR_STOP_MULTIPLIER
-                            take = price - atr_used * ATR_TAKE_PROFIT_MULTIPLIER
-                            order_side = "SELL"
-
-                        place_market_order(
-                            order_side,
-                            quote_size=usd_size if order_side == "BUY" else None,
-                            base_size=btc_size,
-                        )
-                        state.position_open = True
-                        state.side = state.last_signal
-                        state.position_symbol = str(analysis.get("symbol", WATCHLIST[0])).upper()
-                        state.entry_price = price
-                        state.position_size_btc = btc_size
-                        state.position_usd = usd_size
-                        state.stop_loss = stop
-                        state.initial_stop_loss = stop
-                        state.take_profit = take
-                        state.highest_price = price
-                        state.lowest_price = price
-                        state.last_trade_ts = time.time()
-                        save_state()
-                        logger.info("position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f stop=%.2f take=%.2f", state.position_symbol, state.side, price, usd_size, btc_size, stop, take)
-                        await send_telegram(
-                            app,
-                            f"{state.position_symbol} {'Compra' if state.side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
-                            f"Precio: {price:.2f}\nUSD: {usd_size:.2f}\nBTC: {btc_size:.8f}\n"
-                            f"Stop: {stop:.2f}\nTake Profit: {take:.2f}\nATR usado: {atr_used:.2f}\n"
-                            f"Confianza: {state.last_confidence:.2f}\nRazon: {state.last_reason}",
-                        )
-                    else:
-                        logger.info("position_size_below_min usd_size=%.2f min=%.2f", usd_size, MIN_ORDER_USD)
+                    break
+                await open_position_from_analysis(candidate, balance, app)
         except Exception as exc:
             logger.exception("trading_loop_error error=%s", exc)
             await send_telegram(app, f"Error en bot:\n{str(exc)[:900]}")
@@ -1633,6 +1757,8 @@ def validate_config() -> None:
         raise RuntimeError("El modo futures solo esta permitido con EXCHANGE=kraken.")
     if MAX_LEVERAGE > MAX_ALLOWED_LEVERAGE:
         raise RuntimeError(f"MAX_LEVERAGE no puede superar {MAX_ALLOWED_LEVERAGE:.0f}x.")
+    if MAX_OPEN_POSITIONS < 1:
+        raise RuntimeError("MAX_OPEN_POSITIONS debe ser al menos 1.")
     if not DRY_RUN and EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
         raise RuntimeError("Kraken Futures real aun no esta habilitado. Mantén DRY_RUN=true.")
     if not DRY_RUN and not exchange_credentials_available():
@@ -1669,12 +1795,13 @@ def main() -> None:
         app.add_handler(CommandHandler("signal", signal_cmd))
 
     logger.info(
-        "startup dry_run=%s telegram_polling=%s venue=%s symbol=%s max_leverage=%.2fx",
+        "startup dry_run=%s telegram_polling=%s venue=%s symbol=%s max_leverage=%.2fx max_open_positions=%s",
         DRY_RUN,
         use_telegram,
         trading_venue_label(),
         selected_symbol(),
         MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+        MAX_OPEN_POSITIONS,
     )
     if use_telegram:
         app.run_polling(drop_pending_updates=True)

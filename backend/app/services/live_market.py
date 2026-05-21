@@ -15,24 +15,24 @@ TIMEOUT = 5
 DEFAULT_CANDLE_LIMIT = 120
 
 TIMEFRAME_SECONDS = {
-    '5M': 300,
     '15M': 900,
+    '30M': 1800,
     '1H': 3600,
     '4H': 14400,
     '1D': 86400,
 }
 
 KRAKEN_INTERVALS = {
-    '5M': 5,
     '15M': 15,
+    '30M': 30,
     '1H': 60,
     '4H': 240,
     '1D': 1440,
 }
 
 BINANCE_INTERVALS = {
-    '5M': '5m',
     '15M': '15m',
+    '30M': '30m',
     '1H': '1h',
     '4H': '4h',
     '1D': '1d',

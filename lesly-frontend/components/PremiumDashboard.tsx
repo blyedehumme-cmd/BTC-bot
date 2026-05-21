@@ -25,7 +25,13 @@ import { formatNewYorkDateTime, formatNewYorkTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
 
 const navItems = ['Dashboard', 'Señales', 'Operaciones', 'Backtesting', 'Riesgo', 'Configuración', 'IA análisis', 'Historial', 'IA chat'];
-const timeframes = ['5M', '15M', '1H', '4H', '1D'];
+const timeframes = [
+  { label: '15', value: '15M' },
+  { label: '30', value: '30M' },
+  { label: '1', value: '1H' },
+  { label: '4', value: '4H' },
+  { label: '1D', value: '1D' },
+];
 const cryptoMarkets = [
   { symbol: 'BTC', display: 'BTCUSD', name: 'Bitcoin / US Dollar' },
   { symbol: 'ETH', display: 'ETHUSDT', name: 'Ethereum / TetherUS' },
@@ -209,8 +215,8 @@ function CandleChart({
         </div>
         <div className="flex rounded-xl border border-cyan-400/20 bg-black/30 p-1">
           {timeframes.map((item) => (
-            <span key={item} className={`rounded-lg px-3 py-1.5 text-xs transition ${item === timeframe ? 'bg-blue-500 text-white shadow-[0_0_22px_rgba(0,112,255,0.55)]' : 'text-slate-400'}`}>
-              {item}
+            <span key={item.value} className={`rounded-lg px-3 py-1.5 text-xs transition ${item.value === timeframe ? 'bg-blue-500 text-white shadow-[0_0_22px_rgba(0,112,255,0.55)]' : 'text-slate-400'}`}>
+              {item.label}
             </span>
           ))}
         </div>
@@ -581,8 +587,8 @@ export default function PremiumDashboard() {
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <div className="flex flex-wrap gap-2">
                   {timeframes.map((item) => (
-                    <button key={item} onClick={() => setTimeframe(item)} className={`rounded-xl border px-4 py-2 text-sm transition ${item === timeframe ? 'border-blue-400 bg-blue-500/25 text-white shadow-[0_0_24px_rgba(37,99,235,0.45)]' : 'border-cyan-400/10 bg-white/[0.03] text-slate-400 hover:border-cyan-300/40 hover:text-cyan-200'}`} type="button">
-                      {item}
+                    <button key={item.value} onClick={() => setTimeframe(item.value)} className={`rounded-xl border px-4 py-2 text-sm transition ${item.value === timeframe ? 'border-blue-400 bg-blue-500/25 text-white shadow-[0_0_24px_rgba(37,99,235,0.45)]' : 'border-cyan-400/10 bg-white/[0.03] text-slate-400 hover:border-cyan-300/40 hover:text-cyan-200'}`} type="button">
+                      {item.label}
                     </button>
                   ))}
                 </div>
