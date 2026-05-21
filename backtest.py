@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import os
 from typing import Any, Optional
 
 import pandas as pd
@@ -95,6 +96,72 @@ def row_to_analysis(row: pd.Series) -> dict[str, Any]:
     }
 
 
+def prefixed_analysis(row: pd.Series, prefix: str) -> dict[str, Any]:
+    return {
+        "trend": str(row[f"{prefix}_trend"]),
+        "price": float(row[f"{prefix}_close"]),
+        "ema21": float(row[f"{prefix}_ema21"]),
+        "ema50": float(row[f"{prefix}_ema50"]),
+        "ema100": float(row[f"{prefix}_ema100"]),
+        "macd": {
+            "macd": float(row[f"{prefix}_macd"]),
+            "signal": float(row[f"{prefix}_macd_signal"]),
+            "hist": float(row[f"{prefix}_macd_hist"]),
+        },
+        "adx": float(row[f"{prefix}_adx"]),
+        "volume_ratio": float(row[f"{prefix}_volume_ratio"]),
+        "atr": float(row[f"{prefix}_atr"]),
+    }
+
+
+def build_aligned_frame(data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    base = data["1H"].sort_values("time").reset_index(drop=True).copy()
+    indicator_cols = [
+        "time",
+        "trend",
+        "close",
+        "ema21",
+        "ema50",
+        "ema100",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "adx",
+        "volume_ratio",
+        "atr",
+    ]
+    for label, prefix in [("4H", "fourh"), ("1D", "daily"), ("1W", "weekly")]:
+        right = data[label][indicator_cols].sort_values("time").reset_index(drop=True).copy()
+        right = right.rename(columns={col: f"{prefix}_{col}" for col in indicator_cols if col != "time"})
+        base = pd.merge_asof(base, right, on="time", direction="backward")
+    return base
+
+
+def build_signal_from_aligned(row: pd.Series) -> dict[str, Any]:
+    required = [
+        "weekly_trend",
+        "daily_trend",
+        "fourh_trend",
+        "weekly_ema100",
+        "daily_ema100",
+        "fourh_ema100",
+    ]
+    if any(pd.isna(row.get(col)) for col in required):
+        return {
+            "signal": "WAIT",
+            "confidence": 0.0,
+            "reason": "No hay suficientes velas alineadas en todos los timeframes.",
+            "price": float(row["close"]),
+            "atr": float(row["atr"]) if not pd.isna(row["atr"]) else 0.0,
+        }
+
+    weekly = prefixed_analysis(row, "weekly")
+    daily = prefixed_analysis(row, "daily")
+    fourh = prefixed_analysis(row, "fourh")
+    hourly = row_to_analysis(row)
+    return build_signal_from_analyses(weekly, daily, fourh, hourly)
+
+
 def build_signal_at(data: dict[str, pd.DataFrame], timestamp: int) -> dict[str, Any]:
     rows = {
         label: latest_row(frame, timestamp)
@@ -114,6 +181,10 @@ def build_signal_at(data: dict[str, pd.DataFrame], timestamp: int) -> dict[str, 
     fourh = row_to_analysis(rows["4H"])
     hourly = row_to_analysis(rows["1H"])
 
+    return build_signal_from_analyses(weekly, daily, fourh, hourly)
+
+
+def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fourh: dict[str, Any], hourly: dict[str, Any]) -> dict[str, Any]:
     weekly_long_context = weekly["trend"] != "bear" and weekly["price"] >= weekly["ema100"]
     weekly_short_context = weekly["trend"] != "bull" and weekly["price"] <= weekly["ema100"]
 
@@ -182,6 +253,7 @@ def calculate_position_size(balance: float, price: float, atr_value: float) -> f
 class Backtester:
     def __init__(self, data: dict[str, pd.DataFrame]) -> None:
         self.data = data
+        self.aligned = build_aligned_frame(data)
         self.balance = INITIAL_CAPITAL
         self.position: Optional[Position] = None
         self.trades: list[dict[str, Any]] = []
@@ -318,15 +390,14 @@ class Backtester:
         })
 
     def run(self) -> tuple[pd.DataFrame, pd.DataFrame, float]:
-        candles_1h = self.data["1H"]
+        candles_1h = self.aligned
         for _, candle in candles_1h.iterrows():
-            timestamp = int(candle["time"])
             self.update_trailing_stop(candle)
             exit_reason, exit_price = self.check_price_exit(candle)
             if exit_reason and exit_price is not None:
                 self.close_position(candle, exit_price, exit_reason)
 
-            signal = build_signal_at(self.data, timestamp)
+            signal = build_signal_from_aligned(candle)
             allow_immediate_reversal = False
             if self.position is not None:
                 opposite = (
@@ -355,7 +426,8 @@ class Backtester:
 
 
 def main() -> None:
-    data = prepare_data(refresh=False)
+    refresh_data = os.getenv("BACKTEST_REFRESH_DATA", "false").lower().strip() == "true"
+    data = prepare_data(refresh=refresh_data)
     if any(frame.empty for frame in data.values()):
         print("ADVERTENCIA: faltan datos en uno o mas timeframes. El resultado puede ser incompleto.")
     backtester = Backtester(data)

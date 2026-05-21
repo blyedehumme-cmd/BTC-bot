@@ -66,7 +66,7 @@ def calculate_summary(trades: pd.DataFrame, equity_curve: pd.DataFrame, initial_
 def write_report(trades: pd.DataFrame, equity_curve: pd.DataFrame, initial_capital: float, final_capital: float) -> None:
     summary = calculate_summary(trades, equity_curve, initial_capital, final_capital)
     lines = [
-        "REPORTE BACKTEST BTC XBT/USD - Kraken",
+        "REPORTE BACKTEST BTC/USD",
         "=" * 72,
         f"Capital inicial: {money(initial_capital)}",
         f"Capital final: {money(final_capital)}",
@@ -127,7 +127,7 @@ def plot_price_trades(candles_1h: pd.DataFrame, trades: pd.DataFrame) -> None:
         shorts = trades[trades["side"] == "SHORT"]
         plt.scatter(longs["entry_time"], longs["entry_price"], marker="^", color="green", s=65, label="Entrada LONG")
         plt.scatter(shorts["entry_time"], shorts["entry_price"], marker="v", color="red", s=65, label="Entrada SHORT")
-        plt.scatter(trades["exit_time"], trades["exit_price"], marker="x", color="white", edgecolors="black", s=65, label="Cierre")
+        plt.scatter(trades["exit_time"], trades["exit_price"], marker="x", color="white", s=65, label="Cierre")
     plt.title("Precio BTC con entradas y salidas")
     plt.xlabel("Fecha")
     plt.ylabel("Precio USD")

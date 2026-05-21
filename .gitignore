@@ -19,6 +19,13 @@ ENV/
 # Logs and runtime files
 *.log
 bot_state.json
+backtest_report.txt
+equity_curve.png
+price_trades.png
+pnl_distribution.png
+drawdown.png
+data/*.csv
+!data/.gitkeep
 
 # Environment variables
 .env
