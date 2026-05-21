@@ -54,6 +54,7 @@ KRAKEN_BASE_ASSET = os.getenv("KRAKEN_BASE_ASSET", "XXBT").strip()
 KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
 KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
 KRAKEN_FUTURES_API_URL = os.getenv("KRAKEN_FUTURES_API_URL", "https://futures.kraken.com").strip().rstrip("/")
+WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC,ETH,SOL,BCH,LTC").split(",") if item.strip()]
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
@@ -66,7 +67,7 @@ MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.0125"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.70"))
 MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "60"))
-MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
+MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
 ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
@@ -127,6 +128,16 @@ CANDLE_LIMITS = {
     "1W": 120,
 }
 
+MARKETS = {
+    "BTC": {"name": "Bitcoin", "spot_pair": "XBTUSD", "futures_symbol": "PI_XBTUSD", "coinbase": "BTC-USD"},
+    "ETH": {"name": "Ethereum", "spot_pair": "ETHUSD", "futures_symbol": "PI_ETHUSD", "coinbase": "ETH-USD"},
+    "SOL": {"name": "Solana", "spot_pair": "SOLUSD", "futures_symbol": "PF_SOLUSD", "coinbase": "SOL-USD"},
+    "BCH": {"name": "Bitcoin Cash", "spot_pair": "BCHUSD", "futures_symbol": "PF_BCHUSD", "coinbase": "BCH-USD"},
+    "LTC": {"name": "Litecoin", "spot_pair": "LTCUSD", "futures_symbol": "PF_LTCUSD", "coinbase": "LTC-USD"},
+}
+
+WATCHLIST = [symbol for symbol in WATCHLIST if symbol in MARKETS] or ["BTC"]
+
 # =========================
 # LOGGING
 # =========================
@@ -160,6 +171,7 @@ class BotState:
     active: bool = True
     position_open: bool = False
     side: Optional[str] = None
+    position_symbol: str = "BTC"
     entry_price: float = 0.0
     position_size_btc: float = 0.0
     position_usd: float = 0.0
@@ -216,6 +228,7 @@ def load_state() -> None:
             active=bool(data.get("active", True)),
             position_open=bool(data.get("position_open", False)),
             side=data.get("side"),
+            position_symbol=str(data.get("position_symbol", "BTC")).upper(),
             entry_price=float(data.get("entry_price", 0.0)),
             position_size_btc=float(data.get("position_size_btc", 0.0)),
             position_usd=float(data.get("position_usd", 0.0)),
@@ -274,10 +287,16 @@ def get_client() -> RESTClient:
     return client
 
 
-def selected_symbol() -> str:
+def market_config(symbol: Optional[str] = None) -> Dict[str, str]:
+    selected = (symbol or state.position_symbol or WATCHLIST[0]).upper()
+    return MARKETS.get(selected, MARKETS["BTC"])
+
+
+def selected_symbol(symbol: Optional[str] = None) -> str:
+    config = market_config(symbol)
     if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
-        return KRAKEN_FUTURES_SYMBOL
-    return KRAKEN_PAIR if EXCHANGE == "kraken" else PRODUCT_ID
+        return config["futures_symbol"]
+    return config["spot_pair"] if EXCHANGE == "kraken" else config["coinbase"]
 
 
 def exchange_credentials_available() -> bool:
@@ -406,17 +425,18 @@ def finalize_candles(candles: List[Dict[str, Any]], limit: int) -> List[Dict[str
     return ordered[-limit:]
 
 
-def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
+def get_timeframe_candles(timeframe: str, limit: int, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
     fetch_limit = limit + 1 if USE_CLOSED_CANDLES else limit
     if DRY_RUN and not exchange_credentials_available():
-        logger.info("mock_candles timeframe=%s limit=%s", timeframe, limit)
+        logger.info("mock_candles symbol=%s timeframe=%s limit=%s", symbol or WATCHLIST[0], timeframe, limit)
         return finalize_candles(generate_mock_candles(timeframe, fetch_limit), limit)
 
     if EXCHANGE == "kraken":
         since = int(time.time()) - (fetch_limit * CANDLE_SECONDS[timeframe])
+        pair = market_config(symbol)["spot_pair"]
 
         def fetch_kraken() -> Dict[str, Any]:
-            return kraken_public_request("OHLC", {"pair": KRAKEN_PAIR, "interval": KRAKEN_INTERVALS[timeframe], "since": since})
+            return kraken_public_request("OHLC", {"pair": pair, "interval": KRAKEN_INTERVALS[timeframe], "since": since})
 
         data = retry_with_backoff(fetch_kraken)
         pair_key = next((key for key in data.keys() if key != "last"), "")
@@ -441,7 +461,7 @@ def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
     def fetch() -> Any:
         cb = get_client()
         return cb.get_candles(
-            product_id=PRODUCT_ID,
+            product_id=selected_symbol(symbol),
             start=str(start_ts),
             end=str(end_ts),
             granularity=TIMEFRAMES[timeframe],
@@ -505,7 +525,7 @@ def place_market_order(side: str, quote_size: Optional[float] = None, base_size:
         logger.info(
             "paper_order venue=%s symbol=%s leverage=%.2fx side=%s quote_size=%s base_size=%s",
             trading_venue_label(),
-            selected_symbol(),
+            selected_symbol(state.position_symbol),
             MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
             side,
             quote_size,
@@ -514,7 +534,7 @@ def place_market_order(side: str, quote_size: Optional[float] = None, base_size:
         return {
             "dry_run": True,
             "venue": trading_venue_label(),
-            "symbol": selected_symbol(),
+            "symbol": selected_symbol(state.position_symbol),
             "leverage": MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
             "side": side,
             "quote_size": quote_size,
@@ -528,7 +548,7 @@ def place_market_order(side: str, quote_size: Optional[float] = None, base_size:
         def place_kraken() -> Dict[str, Any]:
             volume = base_size
             if volume is None and quote_size is not None:
-                recent = get_timeframe_candles("1H", 2)
+                recent = get_timeframe_candles("1H", 2, state.position_symbol)
                 last_price = float(recent[-1]["close"]) if recent else 0.0
                 if last_price <= 0:
                     raise RuntimeError("No se pudo convertir quote_size a volumen base para Kraken.")
@@ -1070,12 +1090,13 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
     }
 
 
-def analyze_market() -> Dict[str, Any]:
+def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
+    selected = (symbol or WATCHLIST[0]).upper()
     candles = {
-        "1W": get_timeframe_candles("1W", CANDLE_LIMITS["1W"]),
-        "1D": get_timeframe_candles("1D", CANDLE_LIMITS["1D"]),
-        "4H": get_timeframe_candles("4H", CANDLE_LIMITS["4H"]),
-        "1H": get_timeframe_candles("1H", CANDLE_LIMITS["1H"]),
+        "1W": get_timeframe_candles("1W", CANDLE_LIMITS["1W"], selected),
+        "1D": get_timeframe_candles("1D", CANDLE_LIMITS["1D"], selected),
+        "4H": get_timeframe_candles("4H", CANDLE_LIMITS["4H"], selected),
+        "1H": get_timeframe_candles("1H", CANDLE_LIMITS["1H"], selected),
     }
     last_price = float(candles["1H"][-1]["close"]) if candles["1H"] else 0.0
     min_required_candles = EMA_SLOW + MACD_SIGNAL
@@ -1090,8 +1111,35 @@ def analyze_market() -> Dict[str, Any]:
     fourh = timeframe_analysis(candles["4H"], "4H")
     hourly = timeframe_analysis(candles["1H"], "1H")
     signal = build_signal(weekly, daily, fourh, hourly)
-    signal.update({"weekly": weekly, "daily": daily, "fourh": fourh, "hourly": hourly})
+    signal.update({
+        "symbol": selected,
+        "trade_symbol": selected_symbol(selected),
+        "asset_name": market_config(selected)["name"],
+        "weekly": weekly,
+        "daily": daily,
+        "fourh": fourh,
+        "hourly": hourly,
+    })
     return signal
+
+
+def analyze_watchlist() -> List[Dict[str, Any]]:
+    analyses: List[Dict[str, Any]] = []
+    for symbol in WATCHLIST:
+        try:
+            analyses.append(analyze_market(symbol))
+        except Exception as exc:
+            logger.warning("market_analysis_failed symbol=%s error=%s", symbol, exc)
+            failed = empty_analysis(f"Error analizando {symbol}: {exc}", 0.0)
+            failed.update({"symbol": symbol, "trade_symbol": selected_symbol(symbol), "asset_name": market_config(symbol)["name"]})
+            analyses.append(failed)
+    return analyses
+
+
+def choose_trade_analysis(analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    actionable = [item for item in analyses if item.get("signal") in ["LONG", "SHORT"]]
+    candidates = actionable if actionable else analyses
+    return max(candidates, key=lambda item: float(item.get("confidence", 0.0))) if candidates else empty_analysis("Watchlist vacio.", 0.0)
 
 
 # =========================
@@ -1105,7 +1153,7 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     support = max(0.0, price - atr_value * ATR_STOP_MULTIPLIER) if atr_value > 0 else price * 0.995
     resistance = price + atr_value * ATR_STOP_MULTIPLIER if atr_value > 0 else price * 1.005
     return {
-        "symbol": selected_symbol(),
+        "symbol": analysis.get("trade_symbol", selected_symbol(str(analysis.get("symbol", WATCHLIST[0])))),
         "timeframe": "1H",
         "price": price,
         "trend": hourly.get("trend", "neutral"),
@@ -1120,7 +1168,7 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     confidence = int(round(float(analysis.get("confidence", 0.0)) * 100))
     direction = analysis.get("signal", "WAIT")
     return {
-        "symbol": selected_symbol(),
+        "symbol": analysis.get("trade_symbol", selected_symbol(str(analysis.get("symbol", WATCHLIST[0])))),
         "timeframe": "1H",
         "direction": direction,
         "confidence_score": max(0, min(confidence, 100)),
@@ -1140,6 +1188,9 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
     ai_rate_limited = bool(analysis.get("ai_rate_limited", False))
     ai_explanation = str(analysis.get("ai_explanation") or "").strip()
     snapshot = {
+        "symbol": analysis.get("symbol"),
+        "trade_symbol": analysis.get("trade_symbol"),
+        "asset_name": analysis.get("asset_name"),
         "signal": direction,
         "confidence": analysis.get("confidence", 0.0),
         "trend_1h": hourly.get("trend"),
@@ -1213,6 +1264,14 @@ async def send_trade_to_backend(price: float, pnl: float) -> None:
     await post_json_to_backend("trades", build_trade_payload(price, pnl))
 
 
+async def publish_analyses_to_backend(analyses: List[Dict[str, Any]]) -> None:
+    if not BACKEND_API_URL:
+        return
+    for analysis in analyses:
+        await send_snapshot_to_backend(analysis)
+        await send_signal_to_backend(analysis)
+
+
 # =========================
 # RIESGO
 # =========================
@@ -1281,6 +1340,7 @@ def record_trade_pnl(exit_price: float) -> float:
     state.stats.worst_trade = min(state.stats.worst_trade, pnl)
     state.trade_history.append({
         "timestamp": int(time.time()),
+        "symbol": state.position_symbol,
         "side": state.side,
         "entry": state.entry_price,
         "exit": exit_price,
@@ -1318,6 +1378,7 @@ def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
 def close_position_state() -> None:
     state.position_open = False
     state.side = None
+    state.position_symbol = WATCHLIST[0]
     state.entry_price = 0.0
     state.position_size_btc = 0.0
     state.position_usd = 0.0
@@ -1368,8 +1429,10 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Activo: {state.active}\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"Exchange: {EXCHANGE}\n"
-        f"Producto: {selected_symbol()}\n"
+        f"Watchlist: {', '.join(WATCHLIST)}\n"
+        f"Producto: {selected_symbol(state.position_symbol)}\n"
         f"Posicion abierta: {state.position_open}\n"
+        f"Simbolo posicion: {state.position_symbol}\n"
         f"Side: {state.side}\n"
         f"Entrada: {state.entry_price:.2f}\n"
         f"BTC: {state.position_size_btc:.8f}\n"
@@ -1386,7 +1449,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Configuracion\n"
         f"Exchange: {EXCHANGE}\n"
         f"Modo exchange: {EXCHANGE_MODE}\n"
-        f"Producto: {selected_symbol()}\n"
+        f"Watchlist: {', '.join(WATCHLIST)}\n"
+        f"Producto: {selected_symbol(state.position_symbol)}\n"
         f"Apalancamiento max: {MAX_LEVERAGE:.2f}x\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
@@ -1436,7 +1500,12 @@ async def trading_loop(app: Optional[Application]) -> None:
     await send_telegram(app, f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Exchange={EXCHANGE} Producto={selected_symbol()}")
     while True:
         try:
-            analysis = analyze_market()
+            if state.position_open:
+                analysis = analyze_market(state.position_symbol)
+                analyses = [analysis]
+            else:
+                analyses = analyze_watchlist()
+                analysis = choose_trade_analysis(analyses)
             price = float(analysis.get("price", 0.0))
             balance = simulated_equity(price) if DRY_RUN else get_usdc_balance()
             reset_daily_balance_if_needed(balance)
@@ -1454,7 +1523,8 @@ async def trading_loop(app: Optional[Application]) -> None:
                 continue
 
             logger.info(
-                "cycle price=%.2f signal=%s confidence=%.2f equity=%.2f position_open=%s",
+                "cycle symbol=%s price=%.2f signal=%s confidence=%.2f equity=%.2f position_open=%s",
+                analysis.get("symbol", state.position_symbol),
                 price,
                 state.last_signal,
                 state.last_confidence,
@@ -1462,8 +1532,8 @@ async def trading_loop(app: Optional[Application]) -> None:
                 state.position_open,
             )
             logger.info("cycle_reason %s", state.last_reason)
-            await send_snapshot_to_backend(analysis)
-            await send_signal_to_backend(analysis)
+            ordered_analyses = [item for item in analyses if item is not analysis] + [analysis]
+            await publish_analyses_to_backend(ordered_analyses)
 
             if state.position_open:
                 exit_reason = manage_open_position(price, analysis.get("hourly", {}))
@@ -1494,7 +1564,7 @@ async def trading_loop(app: Optional[Application]) -> None:
 
             elif can_trade_now() and state.last_signal in ["LONG", "SHORT"]:
                 if not DRY_RUN and state.last_signal == "SHORT" and not ALLOW_REAL_SPOT_SHORT:
-                    logger.warning("blocked_real_short exchange=%s symbol=%s", EXCHANGE, selected_symbol())
+                    logger.warning("blocked_real_short exchange=%s symbol=%s", EXCHANGE, selected_symbol(str(analysis.get("symbol", WATCHLIST[0]))))
                     await send_telegram(app, "Senal SHORT bloqueada: spot no abre short real sin margin/futures.")
                 elif state.daily_trades >= MAX_TRADES_PER_DAY:
                     logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
@@ -1519,6 +1589,7 @@ async def trading_loop(app: Optional[Application]) -> None:
                         )
                         state.position_open = True
                         state.side = state.last_signal
+                        state.position_symbol = str(analysis.get("symbol", WATCHLIST[0])).upper()
                         state.entry_price = price
                         state.position_size_btc = btc_size
                         state.position_usd = usd_size
@@ -1529,10 +1600,10 @@ async def trading_loop(app: Optional[Application]) -> None:
                         state.lowest_price = price
                         state.last_trade_ts = time.time()
                         save_state()
-                        logger.info("position_opened side=%s price=%.2f usd=%.2f btc=%.8f stop=%.2f take=%.2f", state.side, price, usd_size, btc_size, stop, take)
+                        logger.info("position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f stop=%.2f take=%.2f", state.position_symbol, state.side, price, usd_size, btc_size, stop, take)
                         await send_telegram(
                             app,
-                            f"{'Compra' if state.side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
+                            f"{state.position_symbol} {'Compra' if state.side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
                             f"Precio: {price:.2f}\nUSD: {usd_size:.2f}\nBTC: {btc_size:.8f}\n"
                             f"Stop: {stop:.2f}\nTake Profit: {take:.2f}\nATR usado: {atr_used:.2f}\n"
                             f"Confianza: {state.last_confidence:.2f}\nRazon: {state.last_reason}",

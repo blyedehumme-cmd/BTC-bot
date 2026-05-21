@@ -285,7 +285,34 @@ function MetricCard({
   );
 }
 
-function Sidebar({ botActive, liveNow }: { botActive: boolean; liveNow: Date }) {
+function CryptoSelector({
+  selectedCrypto,
+  onChange,
+  compact = false,
+}: {
+  selectedCrypto: string;
+  onChange: (symbol: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <label className={`flex items-center gap-3 rounded-xl border border-cyan-400/20 bg-black/35 px-4 py-2 text-sm text-slate-300 shadow-[0_0_24px_rgba(0,157,255,0.08)] ${compact ? 'w-full flex-col items-start gap-2' : 'min-w-[230px]'}`}>
+      <span className="text-xs uppercase tracking-[0.18em] text-cyan-300">Criptomoneda</span>
+      <select
+        value={selectedCrypto}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full min-w-0 flex-1 bg-transparent font-semibold text-white outline-none"
+      >
+        {cryptoMarkets.map((market) => (
+          <option key={market.symbol} value={market.symbol} className="bg-slate-950 text-white">
+            {market.display} · {market.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function Sidebar({ botActive, liveNow, selectedCrypto, onCryptoChange }: { botActive: boolean; liveNow: Date; selectedCrypto: string; onCryptoChange: (symbol: string) => void }) {
   return (
     <aside className="premium-card sticky top-4 hidden h-[calc(100vh-2rem)] w-[250px] shrink-0 overflow-hidden p-4 xl:block">
       <div className="mb-8 flex items-center gap-3 px-2 pt-2">
@@ -299,11 +326,14 @@ function Sidebar({ botActive, liveNow }: { botActive: boolean; liveNow: Date }) 
       </div>
       <nav className="space-y-2">
         {navItems.map((item, index) => (
-          <a key={item} href={`#${item.toLowerCase().replace(/ /g, '-')}`} className={`nav-item ${index === 0 ? 'nav-item-active' : ''}`}>
-            <span className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">{['⌂', '↗', '⇄', '▰', '⬟', '⚙', '✦', '☷', '◌'][index]}</span>
-            <span>{item}</span>
-            {item === 'IA chat' && <span className="ml-auto rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] text-cyan-300">BETA</span>}
-          </a>
+          <div key={item} className="space-y-2">
+            {item === 'Señales' && <CryptoSelector selectedCrypto={selectedCrypto} onChange={onCryptoChange} compact />}
+            <a href={`#${item.toLowerCase().replace(/ /g, '-')}`} className={`nav-item ${index === 0 ? 'nav-item-active' : ''}`}>
+              <span className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">{['⌂', '↗', '⇄', '▰', '⬟', '⚙', '✦', '☷', '◌'][index]}</span>
+              <span>{item}</span>
+              {item === 'IA chat' && <span className="ml-auto rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] text-cyan-300">BETA</span>}
+            </a>
+          </div>
         ))}
       </nav>
       <div className={`absolute bottom-4 left-4 right-4 rounded-2xl border p-4 ${botActive ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-rose-400/20 bg-rose-500/10'}`}>
@@ -516,10 +546,11 @@ export default function PremiumDashboard() {
       <div className="energy-line energy-line-a" />
       <div className="energy-line energy-line-b" />
       <div className="relative z-10 flex gap-4 p-3 sm:p-4">
-        <Sidebar botActive={botActive} liveNow={liveNow} />
+        <Sidebar botActive={botActive} liveNow={liveNow} selectedCrypto={selectedCrypto} onCryptoChange={setSelectedCrypto} />
         <section className="min-w-0 flex-1 space-y-4">
           <header className="xl:hidden">
-            <div className="premium-card flex items-center justify-between gap-4 p-4 xl:hidden">
+            <div className="premium-card flex flex-col gap-4 p-4 xl:hidden">
+              <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-2xl font-bold text-white">LESLY</p>
                 <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">NY live · {formatNewYorkTime(liveNow)}</p>
@@ -527,6 +558,8 @@ export default function PremiumDashboard() {
               <span className={`rounded-full border px-3 py-1 text-xs ${botActive ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-rose-400/30 bg-rose-400/10 text-rose-300'}`}>
                 {botActive ? 'Activo' : 'Pausado'}
               </span>
+              </div>
+              <CryptoSelector selectedCrypto={selectedCrypto} onChange={setSelectedCrypto} />
             </div>
           </header>
 
@@ -546,20 +579,6 @@ export default function PremiumDashboard() {
           <section id="dashboard" className="grid gap-4 xl:grid-cols-[1.55fr_0.72fr_0.62fr]">
             <div>
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <label className="flex min-w-[230px] items-center gap-3 rounded-xl border border-cyan-400/20 bg-black/35 px-4 py-2 text-sm text-slate-300 shadow-[0_0_24px_rgba(0,157,255,0.08)]">
-                  <span className="text-xs uppercase tracking-[0.18em] text-cyan-300">Criptomoneda</span>
-                  <select
-                    value={selectedCrypto}
-                    onChange={(event) => setSelectedCrypto(event.target.value)}
-                    className="min-w-0 flex-1 bg-transparent font-semibold text-white outline-none"
-                  >
-                    {cryptoMarkets.map((market) => (
-                      <option key={market.symbol} value={market.symbol} className="bg-slate-950 text-white">
-                        {market.display} · {market.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
                 <div className="flex flex-wrap gap-2">
                   {timeframes.map((item) => (
                     <button key={item} onClick={() => setTimeframe(item)} className={`rounded-xl border px-4 py-2 text-sm transition ${item === timeframe ? 'border-blue-400 bg-blue-500/25 text-white shadow-[0_0_24px_rgba(37,99,235,0.45)]' : 'border-cyan-400/10 bg-white/[0.03] text-slate-400 hover:border-cyan-300/40 hover:text-cyan-200'}`} type="button">

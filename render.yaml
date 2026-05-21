@@ -44,6 +44,10 @@ services:
         value: futures
       - key: MAX_LEVERAGE
         value: "3"
+      - key: WATCHLIST
+        value: BTC,ETH,SOL,BCH,LTC
+      - key: MAX_TRADES_PER_DAY
+        value: "10"
       - key: KRAKEN_PAIR
         value: XBTUSD
       - key: KRAKEN_FUTURES_SYMBOL
