@@ -29,7 +29,6 @@ services:
     name: btc-bot-worker
     runtime: python
     rootDir: .
-    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python btc_bot.py
     envVars:
