@@ -43,19 +43,24 @@ CHAT_ID = os.getenv("CHAT_ID", "").strip()
 TELEGRAM_POLLING_ENABLED = os.getenv("TELEGRAM_POLLING_ENABLED", "false").lower().strip() == "true"
 CB_API_KEY = os.getenv("CB_API_KEY", "").strip()
 CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
-EXCHANGE = os.getenv("EXCHANGE", "coinbase").strip().lower()
+EXCHANGE = os.getenv("EXCHANGE", "kraken").strip().lower()
+EXCHANGE_MODE = os.getenv("EXCHANGE_MODE", "futures").strip().lower()
 PRODUCT_ID = os.getenv("PRODUCT_ID", "BTC-USDC").strip()
 KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "").strip()
 KRAKEN_API_SECRET = os.getenv("KRAKEN_API_SECRET", "").strip()
 KRAKEN_PAIR = os.getenv("KRAKEN_PAIR", "XBTUSD").strip()
+KRAKEN_FUTURES_SYMBOL = os.getenv("KRAKEN_FUTURES_SYMBOL", "PI_XBTUSD").strip()
 KRAKEN_BASE_ASSET = os.getenv("KRAKEN_BASE_ASSET", "XXBT").strip()
 KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
 KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
+KRAKEN_FUTURES_API_URL = os.getenv("KRAKEN_FUTURES_API_URL", "https://futures.kraken.com").strip().rstrip("/")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
 ALLOW_SHORT_SIGNALS = os.getenv("ALLOW_SHORT_SIGNALS", "true").lower().strip() == "true"
 USE_CLOSED_CANDLES = os.getenv("USE_CLOSED_CANDLES", "true").lower().strip() == "true"
+MAX_ALLOWED_LEVERAGE = 3.0
+MAX_LEVERAGE = max(1.0, min(float(os.getenv("MAX_LEVERAGE", "3.0")), MAX_ALLOWED_LEVERAGE))
 
 MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.0125"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
@@ -270,6 +275,8 @@ def get_client() -> RESTClient:
 
 
 def selected_symbol() -> str:
+    if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
+        return KRAKEN_FUTURES_SYMBOL
     return KRAKEN_PAIR if EXCHANGE == "kraken" else PRODUCT_ID
 
 
@@ -277,6 +284,12 @@ def exchange_credentials_available() -> bool:
     if EXCHANGE == "kraken":
         return bool(KRAKEN_API_KEY and KRAKEN_API_SECRET)
     return bool(CB_API_KEY and CB_API_SECRET)
+
+
+def trading_venue_label() -> str:
+    if EXCHANGE == "kraken":
+        return f"kraken-{EXCHANGE_MODE}"
+    return EXCHANGE
 
 
 def kraken_private_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -489,10 +502,29 @@ def get_usdc_balance() -> float:
 
 def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None) -> Dict[str, Any]:
     if DRY_RUN:
-        logger.info("paper_order side=%s quote_size=%s base_size=%s", side, quote_size, base_size)
-        return {"dry_run": True, "side": side, "quote_size": quote_size, "base_size": base_size}
+        logger.info(
+            "paper_order venue=%s symbol=%s leverage=%.2fx side=%s quote_size=%s base_size=%s",
+            trading_venue_label(),
+            selected_symbol(),
+            MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+            side,
+            quote_size,
+            base_size,
+        )
+        return {
+            "dry_run": True,
+            "venue": trading_venue_label(),
+            "symbol": selected_symbol(),
+            "leverage": MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+            "side": side,
+            "quote_size": quote_size,
+            "base_size": base_size,
+        }
 
     if EXCHANGE == "kraken":
+        if EXCHANGE_MODE == "futures":
+            raise RuntimeError("Kraken Futures real aun no esta habilitado. Mantén DRY_RUN=true hasta implementar la API Futures.")
+
         def place_kraken() -> Dict[str, Any]:
             volume = base_size
             if volume is None and quote_size is not None:
@@ -1227,7 +1259,10 @@ def calculate_position_size(balance: float, price: float, atr_val: float) -> flo
     risk_amount = balance * MAX_RISK_PER_TRADE
     stop_distance = atr_val * ATR_STOP_MULTIPLIER
     btc_size = risk_amount / stop_distance
-    usd_size = min(btc_size * price, balance * MAX_POSITION_BALANCE_PCT)
+    max_notional = balance * MAX_POSITION_BALANCE_PCT
+    if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
+        max_notional *= MAX_LEVERAGE
+    usd_size = min(btc_size * price, max_notional)
     if usd_size < MIN_ORDER_USD:
         return 0.0
     return usd_size / price
@@ -1350,7 +1385,9 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(
         "Configuracion\n"
         f"Exchange: {EXCHANGE}\n"
+        f"Modo exchange: {EXCHANGE_MODE}\n"
         f"Producto: {selected_symbol()}\n"
+        f"Apalancamiento max: {MAX_LEVERAGE:.2f}x\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
         f"ALLOW_SHORT_SIGNALS: {ALLOW_SHORT_SIGNALS}\n"
@@ -1519,6 +1556,14 @@ async def post_init(app: Application) -> None:
 def validate_config() -> None:
     if EXCHANGE not in ["coinbase", "kraken"]:
         raise RuntimeError("EXCHANGE debe ser coinbase o kraken.")
+    if EXCHANGE_MODE not in ["spot", "futures"]:
+        raise RuntimeError("EXCHANGE_MODE debe ser spot o futures.")
+    if EXCHANGE != "kraken" and EXCHANGE_MODE == "futures":
+        raise RuntimeError("El modo futures solo esta permitido con EXCHANGE=kraken.")
+    if MAX_LEVERAGE > MAX_ALLOWED_LEVERAGE:
+        raise RuntimeError(f"MAX_LEVERAGE no puede superar {MAX_ALLOWED_LEVERAGE:.0f}x.")
+    if not DRY_RUN and EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
+        raise RuntimeError("Kraken Futures real aun no esta habilitado. Mantén DRY_RUN=true.")
     if not DRY_RUN and not exchange_credentials_available():
         raise RuntimeError(f"Faltan credenciales para EXCHANGE={EXCHANGE}.")
     if DRY_RUN and not exchange_credentials_available():
@@ -1552,7 +1597,14 @@ def main() -> None:
         app.add_handler(CommandHandler("stats", stats_cmd))
         app.add_handler(CommandHandler("signal", signal_cmd))
 
-    logger.info("startup dry_run=%s telegram_polling=%s exchange=%s symbol=%s", DRY_RUN, use_telegram, EXCHANGE, selected_symbol())
+    logger.info(
+        "startup dry_run=%s telegram_polling=%s venue=%s symbol=%s max_leverage=%.2fx",
+        DRY_RUN,
+        use_telegram,
+        trading_venue_label(),
+        selected_symbol(),
+        MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+    )
     if use_telegram:
         app.run_polling(drop_pending_updates=True)
     else:

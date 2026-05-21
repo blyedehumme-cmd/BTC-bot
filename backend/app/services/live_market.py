@@ -311,7 +311,7 @@ def _kraken_live_price(timeframe: str) -> dict[str, object]:
 
 def fetch_live_market_data(timeframe: str = '1H') -> dict[str, object]:
     selected_timeframe = _normalize_timeframe(timeframe)
-    providers = [_coinbase_live_price, _kraken_live_price, _binance_live_price]
+    providers = [_kraken_live_price, _coinbase_live_price, _binance_live_price]
     last_exception = None
     for provider in providers:
         try:

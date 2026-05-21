@@ -40,9 +40,15 @@ services:
       - key: PRODUCT_ID
         value: BTC-USDC
       - key: EXCHANGE
-        value: coinbase
+        value: kraken
+      - key: EXCHANGE_MODE
+        value: futures
+      - key: MAX_LEVERAGE
+        value: "3"
       - key: KRAKEN_PAIR
         value: XBTUSD
+      - key: KRAKEN_FUTURES_SYMBOL
+        value: PI_XBTUSD
       - key: KRAKEN_BASE_ASSET
         value: XXBT
       - key: KRAKEN_QUOTE_ASSET

@@ -13,7 +13,7 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
 - Modo `DRY_RUN` para simulación
 - ATR real basado en high/low/close
 - ADX suavizado estilo Wilder
-- Soporte configurable para Coinbase Advanced Trade o Kraken Pro Spot
+- Soporte configurable para Coinbase Advanced Trade, Kraken Pro Spot y simulacion Kraken Futures
 - Protección contra SHORT real accidental en exchanges spot
 - Backend opcional: si `BACKEND_API_URL` está vacío, el bot no intenta postear
 
@@ -25,12 +25,15 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
   - `CHAT_ID`
   - `CB_API_KEY`
   - `CB_API_SECRET`
-  - `EXCHANGE` (`coinbase` o `kraken`, por defecto `coinbase`)
+  - `EXCHANGE` (`coinbase` o `kraken`, por defecto `kraken`)
+  - `EXCHANGE_MODE` (`spot` o `futures`, por defecto `futures` con `DRY_RUN=true`)
   - `PRODUCT_ID` (por defecto `BTC-USDC`)
   - `KRAKEN_API_KEY`
   - `KRAKEN_API_SECRET`
   - `KRAKEN_PAIR` (por defecto `XBTUSD`)
+  - `KRAKEN_FUTURES_SYMBOL` (por defecto `PI_XBTUSD`)
   - `KRAKEN_QUOTE_ASSET` (por defecto `ZUSD`)
+  - `MAX_LEVERAGE` (capado internamente a `3x`)
   - `DRY_RUN` (`true` o `false`)
   - `USE_AI_ASSIST` (`true` o `false`)
   - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)
@@ -52,19 +55,23 @@ python3 btc_bot.py
 
 El bot valida la configuración y ejecuta el loop principal. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque spot no abre posiciones cortas reales sin margin/futures.
 
-### Usar Kraken Pro Spot
+### Usar Kraken Pro / Futures en simulación
 
-Para usar Kraken en vez de Coinbase:
+Para usar Kraken en vez de Coinbase en modo paper/futures:
 
 ```bash
 EXCHANGE=kraken
+EXCHANGE_MODE=futures
+MAX_LEVERAGE=3
 KRAKEN_API_KEY=...
 KRAKEN_API_SECRET=...
 KRAKEN_PAIR=XBTUSD
+KRAKEN_FUTURES_SYMBOL=PI_XBTUSD
 KRAKEN_QUOTE_ASSET=ZUSD
+DRY_RUN=true
 ```
 
-En Kraken, las órdenes market usan `volume` del activo base. El bot calcula el tamaño en BTC y lo envía como volumen base.
+En `DRY_RUN=true`, el bot simula LONG/SHORT tipo futures con apalancamiento maximo 3x. Si `EXCHANGE_MODE=spot`, las órdenes market reales de Kraken usan `volume` del activo base. El modo real de Kraken Futures queda bloqueado hasta implementar y probar la API privada de futures, para evitar que una señal se ejecute en el mercado equivocado.
 
 Telegram puede enviar notificaciones sin polling. Para evitar `telegram.error.Conflict: terminated by other getUpdates request` en Render, deja:
 
