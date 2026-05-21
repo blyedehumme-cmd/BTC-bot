@@ -77,7 +77,7 @@ ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
 ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "1.5"))
 
-USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "true").lower().strip() == "true"
+USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "false").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
@@ -685,7 +685,7 @@ def macd(values: List[float]) -> Dict[str, float]:
     fast_series = ema_series(values, MACD_FAST)
     slow_series = ema_series(values, MACD_SLOW)
     macd_line = [fast - slow for fast, slow in zip(fast_series, slow_series)]
-    signal_series = ema_series(macd_line[-(MACD_SIGNAL * 5):], MACD_SIGNAL)
+    signal_series = ema_series(macd_line, MACD_SIGNAL)
     current_macd = macd_line[-1]
     current_signal = signal_series[-1] if signal_series else current_macd
     return {"macd": current_macd, "signal": current_signal, "hist": current_macd - current_signal}
