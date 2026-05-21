@@ -30,6 +30,7 @@ def decision_to_log(decision: AiDecision) -> AiLogResponse:
         message=decision.reason,
         severity=_severity_for_decision(decision.decision_type),
         detail=decision.explanation,
+        condition_snapshot=decision.condition_snapshot,
     )
 
 

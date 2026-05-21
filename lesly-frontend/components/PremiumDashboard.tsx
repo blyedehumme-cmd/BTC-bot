@@ -37,6 +37,27 @@ type Candle = {
   volume: number;
 };
 
+type StrategyCheck = {
+  label: string;
+  status: string;
+  value?: string | number;
+  detail?: string;
+};
+
+type DecisionSnapshot = {
+  signal?: string;
+  confidence?: number;
+  trend_1h?: string;
+  adx?: number;
+  volume_ratio?: number;
+  atr?: number;
+  volatility_ratio?: number;
+  strategy_checks?: StrategyCheck[];
+  blocked_reasons?: string[];
+  ai_called?: boolean;
+  ai_rate_limited?: boolean;
+};
+
 function formatMoney(value?: number | null) {
   return typeof value === 'number' && Number.isFinite(value) ? money.format(value) : '—';
 }
@@ -54,6 +75,16 @@ function signalTone(signal?: string | null) {
 
 function latest<T>(items?: T[] | null): T | null {
   return items && items.length > 0 ? items[items.length - 1] : null;
+}
+
+function parseDecisionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
+  const source = (logs ?? []).find((log) => log.condition_snapshot);
+  if (!source?.condition_snapshot) return null;
+  try {
+    return JSON.parse(source.condition_snapshot) as DecisionSnapshot;
+  } catch {
+    return null;
+  }
 }
 
 function useLiveClock() {
@@ -238,6 +269,67 @@ function SystemStatus({ aiStatus }: { aiStatus: AiStatus | null }) {
   );
 }
 
+function StrategyMatrix({ checks, blockedReasons }: { checks: StrategyCheck[]; blockedReasons: string[] }) {
+  return (
+    <div className="premium-card p-5">
+      <div className="panel-head"><h2>Matriz swing</h2><span>{blockedReasons.length ? 'WAIT' : 'alineado'}</span></div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {checks.length === 0 && <p className="text-sm text-slate-500">Esperando snapshot de estrategia del bot.</p>}
+        {checks.map((check, index) => {
+          const ok = check.status === 'ok';
+          return (
+            <div key={`${check.label}-${index}`} className={`rounded-2xl border p-3 ${ok ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-rose-400/20 bg-rose-500/10'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{check.label}</p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ok ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'}`}>{ok ? 'OK' : 'BLOQUEA'}</span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-white">{String(check.value ?? check.detail ?? '—')}</p>
+              {check.detail && <p className="mt-1 text-xs text-slate-500">{check.detail}</p>}
+            </div>
+          );
+        })}
+      </div>
+      {blockedReasons.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-amber-300">Por qué no entra</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {blockedReasons.slice(0, 6).map((reason) => <span key={reason} className="rounded-full border border-amber-300/20 px-3 py-1 text-xs text-amber-100">{reason}</span>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EquityPanel({ performance }: { performance: Performance | null }) {
+  const curve = performance?.equity_curve ?? [];
+  const values = curve.length > 1 ? curve.map((point) => point.equity) : [0, performance?.average_return ?? 0, performance?.win_rate ?? 0];
+  const monthly = performance?.monthly_stats ?? [];
+  return (
+    <div className="premium-card p-5">
+      <div className="panel-head"><h2>Equity curve</h2><span>{curve.length} cierres</span></div>
+      <div className="h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+        <MiniSparkline values={values} tone={(values.at(-1) ?? 0) >= 0 ? 'green' : 'red'} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Profit factor proxy</p><p className="mt-2 text-xl font-semibold text-cyan-200">{performance?.wins && performance?.losses ? (performance.wins / Math.max(performance.losses, 1)).toFixed(2) : '—'}</p></div>
+        <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Drawdown</p><p className="mt-2 text-xl font-semibold text-rose-300">{performance?.max_drawdown ?? 0}%</p></div>
+        <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Promedio</p><p className="mt-2 text-xl font-semibold text-emerald-300">{performance?.average_return ?? 0}%</p></div>
+      </div>
+      <div className="mt-4 space-y-2">
+        {monthly.slice(0, 3).map((row) => (
+          <div key={row.month} className="grid grid-cols-4 gap-2 rounded-xl border border-cyan-400/10 bg-black/20 p-2 text-xs">
+            <span className="text-slate-400">{row.month}</span>
+            <span>{row.trades} trades</span>
+            <span className="text-emerald-300">{row.win_rate}% WR</span>
+            <span className={row.pnl_pct >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatPct(row.pnl_pct)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PremiumDashboard() {
   const [timeframe, setTimeframe] = useState('1H');
   const [botControl, setBotControl] = useState<BotControl | null>(null);
@@ -286,6 +378,9 @@ export default function PremiumDashboard() {
   const pnl = recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
+  const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
+  const strategyChecks = decisionSnapshot?.strategy_checks ?? [];
+  const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background text-slate-100">
@@ -350,6 +445,29 @@ export default function PremiumDashboard() {
             <SystemStatus aiStatus={aiStatus} />
           </section>
 
+          <section id="riesgo" className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <StrategyMatrix checks={strategyChecks} blockedReasons={blockedReasons} />
+            <div className="premium-card p-5">
+              <div className="panel-head"><h2>Control de riesgo</h2><span>paper safe</span></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  ['ATR real', decisionSnapshot?.atr ? number.format(decisionSnapshot.atr) : '—', 'text-cyan-300'],
+                  ['ADX 1H', decisionSnapshot?.adx ? number.format(decisionSnapshot.adx) : '—', 'text-emerald-300'],
+                  ['Volumen', decisionSnapshot?.volume_ratio ? `${decisionSnapshot.volume_ratio.toFixed(2)}x` : '—', 'text-cyan-300'],
+                  ['Volatilidad', decisionSnapshot?.volatility_ratio ? `${decisionSnapshot.volatility_ratio.toFixed(2)} ATR` : '—', 'text-amber-300'],
+                ].map(([label, value, className]) => (
+                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                    <p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 rounded-2xl border border-cyan-400/10 bg-black/25 p-4 text-sm text-slate-300">
+                <p>Entradas solo con vela cerrada, confirmación 1D/4H/1H, ADX y volumen obligatorios.</p>
+              </div>
+            </div>
+          </section>
+
           <section id="señales" className="grid gap-4 xl:grid-cols-[0.9fr_1fr_0.82fr]">
             <div className="premium-card p-5">
               <div className="panel-head"><h2>Señal actual</h2><span className={signalTone(signal)}>{signal}</span></div>
@@ -377,7 +495,7 @@ export default function PremiumDashboard() {
                   ['Avg return', `${performance?.average_return ?? 0}%`, 'text-cyan-300'],
                 ].map(([label, value, className]) => <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p></div>)}
               </div>
-              <div className="mt-5 h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><MiniSparkline values={[2, 4, 3, 8, 7, 12, 10, 16, 15, 20]} tone="green" /></div>
+              <div className="mt-5 h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><MiniSparkline values={(performance?.equity_curve?.length ? performance.equity_curve.map((point) => point.equity) : [2, 4, 3, 8, 7, 12, 10, 16, 15, 20])} tone="green" /></div>
             </div>
 
             <div className="premium-card p-5">
@@ -385,6 +503,32 @@ export default function PremiumDashboard() {
               <div className="space-y-3">
                 {closedSignals.length === 0 && <p className="text-sm text-slate-500">Sin señales cerradas todavía.</p>}
                 {closedSignals.map((item) => <div key={item.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className={item.direction === 'SHORT' ? 'text-rose-300' : item.direction === 'LONG' ? 'text-emerald-300' : 'text-cyan-300'}>{item.direction}</span><span className="text-slate-400">{item.confidence_score}%</span><span className="text-slate-500">{formatNewYorkDateTime(item.created_at)}</span></div>)}
+              </div>
+            </div>
+          </section>
+
+          <section id="backtesting" className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+            <EquityPanel performance={performance} />
+            <div className="premium-card p-5">
+              <div className="panel-head"><h2>Trade journal</h2><span>{recentTrades.length} recientes</span></div>
+              <div className="space-y-3">
+                {recentTrades.length === 0 && <p className="text-sm text-slate-500">El journal se llenará cuando cierren operaciones paper.</p>}
+                {recentTrades.map((trade) => (
+                  <div key={`journal-${trade.id}`} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-semibold text-white">Trade #{trade.id}</span>
+                      <span className="text-slate-500">{formatNewYorkDateTime(trade.closed_at ?? trade.opened_at)}</span>
+                      <span className={(trade.result_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatPct(trade.result_pct)}</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
+                      <span className="text-slate-400">Entrada {formatMoney(trade.entry_price)}</span>
+                      <span className="text-rose-300">SL {formatMoney(trade.stop_loss)}</span>
+                      <span className="text-cyan-300">TP {formatMoney(trade.take_profit)}</span>
+                      <span className="text-slate-400">Cierre {formatMoney(trade.closed_price)}</span>
+                    </div>
+                    {trade.notes && <p className="mt-2 line-clamp-2 text-xs text-slate-500">{trade.notes}</p>}
+                  </div>
+                ))}
               </div>
             </div>
           </section>
@@ -408,7 +552,7 @@ export default function PremiumDashboard() {
             <div className="premium-card p-5">
               <div className="panel-head"><h2>IA chat</h2><span>decision stream</span></div>
               <div className="space-y-3">
-                {(aiLogs ?? []).slice(-6).reverse().map((log, index) => <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble"><p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'AI'}</p><p className="mt-1 text-sm text-slate-200">{log.message}</p>{log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}</div>)}
+                {(aiLogs ?? []).slice(0, 6).map((log, index) => <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble"><p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'AI'}</p><p className="mt-1 text-sm text-slate-200">{log.message}</p>{log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}</div>)}
                 {(aiLogs ?? []).length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando mensajes del motor IA y decisiones del bot.</p></div>}
               </div>
             </div>

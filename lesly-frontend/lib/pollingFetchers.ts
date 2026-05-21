@@ -48,6 +48,20 @@ export type Performance = {
   win_rate: number;
   average_return: number;
   max_drawdown: number;
+  equity_curve?: Array<{
+    time: string;
+    equity: number;
+    trade_id: number;
+    result_pct: number;
+  }>;
+  monthly_stats?: Array<{
+    month: string;
+    trades: number;
+    wins: number;
+    losses: number;
+    pnl_pct: number;
+    win_rate: number;
+  }>;
 };
 
 export type AiLog = {
@@ -56,6 +70,7 @@ export type AiLog = {
   message: string;
   severity?: string;
   detail?: string;
+  condition_snapshot?: string;
 };
 
 export type AiStatus = {

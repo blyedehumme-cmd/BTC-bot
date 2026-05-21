@@ -54,6 +54,8 @@ KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().r
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
+ALLOW_SHORT_SIGNALS = os.getenv("ALLOW_SHORT_SIGNALS", "true").lower().strip() == "true"
+USE_CLOSED_CANDLES = os.getenv("USE_CLOSED_CANDLES", "true").lower().strip() == "true"
 
 MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.0125"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
@@ -86,6 +88,7 @@ ADX_PERIOD = 14
 ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "23.0"))
 VOLUME_HEALTH_MIN = 0.75
 AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
+MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -383,13 +386,21 @@ def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
     return result
 
 
+def finalize_candles(candles: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    ordered = sorted(candles, key=lambda item: int(item.get("start", 0)))
+    if USE_CLOSED_CANDLES and len(ordered) > 1:
+        ordered = ordered[:-1]
+    return ordered[-limit:]
+
+
 def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
+    fetch_limit = limit + 1 if USE_CLOSED_CANDLES else limit
     if DRY_RUN and not exchange_credentials_available():
         logger.info("mock_candles timeframe=%s limit=%s", timeframe, limit)
-        return generate_mock_candles(timeframe, limit)
+        return finalize_candles(generate_mock_candles(timeframe, fetch_limit), limit)
 
     if EXCHANGE == "kraken":
-        since = int(time.time()) - (limit * CANDLE_SECONDS[timeframe])
+        since = int(time.time()) - (fetch_limit * CANDLE_SECONDS[timeframe])
 
         def fetch_kraken() -> Dict[str, Any]:
             return kraken_public_request("OHLC", {"pair": KRAKEN_PAIR, "interval": KRAKEN_INTERVALS[timeframe], "since": since})
@@ -398,7 +409,7 @@ def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
         pair_key = next((key for key in data.keys() if key != "last"), "")
         rows = data.get(pair_key, []) if pair_key else []
         result = []
-        for row in rows[-limit:]:
+        for row in rows[-fetch_limit:]:
             if len(row) < 7:
                 continue
             result.append({
@@ -409,10 +420,10 @@ def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
                 "close": float(row[4]),
                 "volume": float(row[6]),
             })
-        return sorted(result, key=lambda item: int(item.get("start", 0)))
+        return finalize_candles(result, limit)
 
     end_ts = int(time.time())
-    start_ts = end_ts - (limit * CANDLE_SECONDS[timeframe])
+    start_ts = end_ts - (fetch_limit * CANDLE_SECONDS[timeframe])
 
     def fetch() -> Any:
         cb = get_client()
@@ -441,7 +452,7 @@ def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
                 "close": getattr(candle, "close", 0),
                 "volume": getattr(candle, "volume", 0),
             })
-    return sorted(result, key=lambda item: int(item.get("start", 0)))
+    return finalize_candles(result, limit)
 
 
 def get_usdc_balance() -> float:
@@ -650,6 +661,7 @@ def empty_timeframe(price: float = 0.0) -> Dict[str, Any]:
         "adx": 0.0,
         "volume_ratio": 1.0,
         "atr": 0.0,
+        "volatility_ratio": 0.0,
     }
 
 
@@ -682,6 +694,8 @@ def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Di
         else "bear" if ema21_val < ema50_val and price < ema100_val
         else "neutral"
     )
+    atr_value = atr_real(candles, 14)
+    latest_range = float(candles[-1]["high"]) - float(candles[-1]["low"])
     return {
         "trend": trend,
         "price": price,
@@ -691,7 +705,8 @@ def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Di
         "macd": macd(closes),
         "adx": adx(candles),
         "volume_ratio": volume_ratio(candles),
-        "atr": atr_real(candles, 14),
+        "atr": atr_value,
+        "volatility_ratio": latest_range / atr_value if atr_value > 0 else 0.0,
     }
 
 
@@ -855,6 +870,8 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
 
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
     atr_value = float(hourly.get("atr", 0.0))
+    volatility_ratio = float(hourly.get("volatility_ratio", 0.0))
+    volatility_ok = volatility_ratio <= MAX_CANDLE_ATR_MULTIPLIER if volatility_ratio > 0 else True
     candidate_checks = {
         "LONG": [
             (daily["trend"] == "bull", 0.24, "1D bullish", "1D no confirma LONG"),
@@ -863,14 +880,17 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             (hourly["macd"]["hist"] > 0, 0.12, "MACD 1H positivo", "MACD 1H no confirma LONG"),
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
+            (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
         ],
         "SHORT": [
+            (ALLOW_SHORT_SIGNALS, 0.00, "SHORT habilitado", "Senales SHORT deshabilitadas por configuracion"),
             (daily["trend"] == "bear", 0.24, "1D bearish", "1D no confirma SHORT"),
             (fourh["trend"] == "bear", 0.24, "4H bearish", "4H no confirma SHORT"),
             (hourly["trend"] == "bear", 0.12, "1H bearish", "1H no confirma SHORT"),
             (hourly["macd"]["hist"] < 0, 0.12, "MACD 1H negativo", "MACD 1H no confirma SHORT"),
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
+            (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
         ],
     }
     weekly_context = {
@@ -891,22 +911,42 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         confidence = 0.0
         reasons: List[str] = []
         failures: List[str] = []
+        check_rows: List[Dict[str, Any]] = []
         context_ok, context_reason, context_failure = weekly_context[direction]
         if context_ok:
             reasons.append(context_reason)
         else:
             failures.append(context_failure)
+        check_rows.append({
+            "label": "1W contexto",
+            "status": "ok" if context_ok else "block",
+            "value": weekly["trend"],
+            "detail": context_reason if context_ok else context_failure,
+        })
         for passed, weight, reason, failure in checks:
             if passed:
                 confidence += weight
                 reasons.append(reason)
             else:
                 failures.append(failure)
+            check_rows.append({
+                "label": reason.split(" ")[0] if reason.startswith(("1D", "4H", "1H")) else reason,
+                "status": "ok" if passed else "block",
+                "value": reason if passed else failure,
+                "detail": reason if passed else failure,
+            })
+        check_rows.append({
+            "label": "ATR real",
+            "status": "ok" if atr_value > 0 else "block",
+            "value": round(atr_value, 4),
+            "detail": "ATR disponible para SL/TP/trailing" if atr_value > 0 else "ATR real no disponible",
+        })
         candidates.append({
             "direction": direction,
             "confidence": confidence,
             "reasons": reasons,
             "failures": failures,
+            "checks": check_rows,
             "strict_ok": context_ok and not failures and atr_value > 0,
         })
 
@@ -943,6 +983,9 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         "ai_rate_limited": ai_evaluation.get("rate_limited", False),
         "ai_explanation": ai_evaluation.get("openai_explanation", ""),
         "ai_feedback": ai_evaluation.get("openai", {}),
+        "strategy_checks": best_candidate.get("checks", []),
+        "blocked_reasons": best_candidate.get("failures", []),
+        "volatility_ratio": volatility_ratio,
     }
 
     if atr_value <= 0:
@@ -1071,6 +1114,9 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
         "adx": hourly.get("adx"),
         "volume_ratio": hourly.get("volume_ratio"),
         "atr": hourly.get("atr"),
+        "volatility_ratio": analysis.get("volatility_ratio"),
+        "strategy_checks": analysis.get("strategy_checks", []),
+        "blocked_reasons": analysis.get("blocked_reasons", []),
         "ai_called": ai_called,
         "ai_rate_limited": ai_rate_limited,
         "ai_feedback": analysis.get("ai_feedback", {}),
@@ -1307,6 +1353,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Producto: {selected_symbol()}\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
+        f"ALLOW_SHORT_SIGNALS: {ALLOW_SHORT_SIGNALS}\n"
+        f"USE_CLOSED_CANDLES: {USE_CLOSED_CANDLES}\n"
         f"IA asistida: {USE_AI_ASSIST}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"

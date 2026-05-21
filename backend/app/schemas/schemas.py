@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SignalBase(BaseModel):
@@ -41,6 +41,7 @@ class AiLogResponse(BaseModel):
     message: str
     severity: Optional[str] = None
     detail: Optional[str] = None
+    condition_snapshot: Optional[str] = None
 
 
 class AiStatusResponse(BaseModel):
@@ -84,6 +85,8 @@ class StrategyPerformanceResponse(BaseModel):
     win_rate: int
     average_return: float
     max_drawdown: float
+    equity_curve: List[Dict[str, Any]] = Field(default_factory=list)
+    monthly_stats: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class MarketLiveResponse(BaseModel):
