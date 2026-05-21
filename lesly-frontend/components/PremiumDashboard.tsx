@@ -211,19 +211,43 @@ function CandleChart({ price, support, resistance, timeframe }: { price: number;
   );
 }
 
-function MetricCard({ label, value, sub, tone = 'cyan', values }: { label: string; value: string; sub?: string; tone?: 'cyan' | 'green' | 'red'; values: number[] }) {
+function MetricCard({
+  label,
+  value,
+  sub,
+  tone = 'cyan',
+  values,
+  indicatorLabel,
+  indicatorValue,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: 'cyan' | 'green' | 'red';
+  values?: number[];
+  indicatorLabel?: string;
+  indicatorValue?: string;
+}) {
   const color = tone === 'green' ? 'text-emerald-300' : tone === 'red' ? 'text-rose-300' : 'text-cyan-300';
+  const border = tone === 'green' ? 'border-emerald-400/25 bg-emerald-400/10' : tone === 'red' ? 'border-rose-400/25 bg-rose-400/10' : 'border-cyan-400/25 bg-cyan-400/10';
   return (
     <article className="premium-card group min-h-[118px] p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/60 hover:shadow-[0_0_45px_rgba(0,157,255,0.22)]">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="panel-label">{label}</p>
           <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
           {sub && <p className={`mt-1 text-sm font-semibold ${color}`}>{sub}</p>}
         </div>
-        <div className="w-24 opacity-90 transition group-hover:scale-105">
-          <MiniSparkline values={values} tone={tone} />
-        </div>
+        {indicatorLabel && indicatorValue ? (
+          <div className={`min-w-[92px] rounded-2xl border px-3 py-2 text-right ${border}`}>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{indicatorLabel}</p>
+            <p className={`mt-1 text-sm font-semibold ${color}`}>{indicatorValue}</p>
+          </div>
+        ) : values && values.length > 1 ? (
+          <div className="w-24 opacity-90 transition group-hover:scale-105">
+            <MiniSparkline values={values} tone={tone} />
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -449,10 +473,10 @@ export default function PremiumDashboard() {
           </header>
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Balance total (papel)" value={formatMoney(paperStartingBalance)} sub="capital inicial" values={spark} tone="green" />
-            <MetricCard label="Equity" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} values={spark.slice().reverse()} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} />
-            <MetricCard label="P&L simulado" value={formatPct(cumulativePnlPct)} sub="trades cerrados" values={recentTrades.map((trade, i) => (trade.result_pct ?? 0) + i + 8)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} />
-            <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} values={[10, 14, 12, confidence || 20, 28, 34]} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} />
+            <MetricCard label="Balance total (papel)" value={formatMoney(paperStartingBalance)} sub="capital inicial" tone="green" indicatorLabel="Modo" indicatorValue="DRY RUN" />
+            <MetricCard label="Equity" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
+            <MetricCard label="P&L simulado" value={formatPct(cumulativePnlPct)} sub="trades cerrados" tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
+            <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
             <div className="space-y-2">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
               <p className={`px-2 text-xs ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}>
