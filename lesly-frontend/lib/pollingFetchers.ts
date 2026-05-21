@@ -85,6 +85,8 @@ export type AiStatus = {
 
 export type LiveMarket = {
   symbol: string;
+  asset?: string;
+  asset_name?: string;
   exchange?: string;
   timeframe?: string;
   price: number;
@@ -124,7 +126,9 @@ export const fetchTrades = () => fetchJson<Trade[]>('/trades');
 export const fetchPerformance = () => fetchJson<Performance>('/ai/performance');
 export const fetchAiLogs = () => fetchJson<AiLog[]>('/logs');
 export const fetchAiStatus = () => fetchJson<AiStatus>('/ai/status');
-export const fetchLiveMarket = (timeframe = '1H') => fetchJson<LiveMarket>(`/market/live?timeframe=${encodeURIComponent(timeframe)}`);
+export const fetchLiveMarket = (timeframe = '1H', symbol = 'BTC') => (
+  fetchJson<LiveMarket>(`/market/live?timeframe=${encodeURIComponent(timeframe)}&symbol=${encodeURIComponent(symbol)}`)
+);
 export const fetchBotControl = () => fetchJson<BotControl>('/bot/status');
 export const startBot = () => postJson<BotControl>('/bot/start');
 export const stopBot = () => postJson<BotControl>('/bot/stop');

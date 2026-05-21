@@ -91,6 +91,8 @@ class StrategyPerformanceResponse(BaseModel):
 
 class MarketLiveResponse(BaseModel):
     symbol: str
+    asset: Optional[str] = None
+    asset_name: Optional[str] = None
     exchange: Optional[str] = None
     timeframe: Optional[str] = None
     price: float

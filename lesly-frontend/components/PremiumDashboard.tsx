@@ -26,6 +26,13 @@ import { usePolling } from '../lib/usePolling';
 
 const navItems = ['Dashboard', 'Señales', 'Operaciones', 'Backtesting', 'Riesgo', 'Configuración', 'IA análisis', 'Historial', 'IA chat'];
 const timeframes = ['5M', '15M', '1H', '4H', '1D'];
+const cryptoMarkets = [
+  { symbol: 'BTC', display: 'BTCUSD', name: 'Bitcoin / US Dollar' },
+  { symbol: 'ETH', display: 'ETHUSDT', name: 'Ethereum / TetherUS' },
+  { symbol: 'SOL', display: 'SOLUSD', name: 'Solana / US Dollar' },
+  { symbol: 'BCH', display: 'BCHUSD', name: 'Bitcoin Cash / Dólar' },
+  { symbol: 'LTC', display: 'LTCUSD', name: 'Litecoin / Dólar' },
+];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const paperStartingBalance = Number(process.env.NEXT_PUBLIC_PAPER_STARTING_BALANCE ?? 5000);
@@ -166,6 +173,8 @@ function CandleChart({
   timeframe,
   candles: liveCandles,
   exchange,
+  label,
+  assetName,
 }: {
   price: number;
   support?: number;
@@ -173,6 +182,8 @@ function CandleChart({
   timeframe: string;
   candles?: Candle[];
   exchange?: string;
+  label?: string;
+  assetName?: string;
 }) {
   const candles = useMemo(() => {
     const clean = (liveCandles ?? []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value)));
@@ -189,11 +200,12 @@ function CandleChart({
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,157,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(0,157,255,0.055)_1px,transparent_1px)] bg-[size:70px_38px]" />
       <div className="relative z-10 mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="panel-label">BTC/USDT</p>
+          <p className="panel-label">{label ?? 'BTCUSD'}</p>
           <div className="mt-2 flex flex-wrap items-end gap-3">
             <p className="text-3xl font-semibold text-white sm:text-4xl">{formatMoney(price)}</p>
             <span className="pb-1 text-sm font-semibold text-emerald-300">{exchange ? `${exchange.toUpperCase()} live` : 'Live'}</span>
           </div>
+          {assetName && <p className="mt-1 text-xs text-slate-500">{assetName}</p>}
         </div>
         <div className="flex rounded-xl border border-cyan-400/20 bg-black/30 p-1">
           {timeframes.map((item) => (
@@ -422,11 +434,12 @@ function EquityPanel({ performance }: { performance: Performance | null }) {
 
 export default function PremiumDashboard() {
   const [timeframe, setTimeframe] = useState('1H');
+  const [selectedCrypto, setSelectedCrypto] = useState('BTC');
   const [botControl, setBotControl] = useState<BotControl | null>(null);
   const [botActionBusy, setBotActionBusy] = useState(false);
   const [botActionMessage, setBotActionMessage] = useState('');
   const liveNow = useLiveClock();
-  const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe), [timeframe]), 3500);
+  const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe, selectedCrypto), [timeframe, selectedCrypto]), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
   const { data: signals } = usePolling<Signal[]>(useCallback(() => fetchSignals(), []), 4000);
   const { data: trades } = usePolling<Trade[]>(useCallback(() => fetchTrades(), []), 5000);
@@ -460,6 +473,7 @@ export default function PremiumDashboard() {
   const recentTrades = (trades ?? []).slice(-5).reverse();
   const closedSignals = (signals ?? []).filter((signal) => signal.direction !== activeSignal?.direction || signal.id !== activeSignal?.id).slice(-4).reverse();
   const price = live?.price ?? snapshot?.price ?? 0;
+  const selectedMarket = cryptoMarkets.find((market) => market.symbol === selectedCrypto) ?? cryptoMarkets[0];
   const support = live?.support ?? snapshot?.support ?? undefined;
   const resistance = live?.resistance ?? snapshot?.resistance ?? undefined;
   const signal = activeSignal?.direction ?? live?.signal ?? 'WAIT';
@@ -531,21 +545,46 @@ export default function PremiumDashboard() {
 
           <section id="dashboard" className="grid gap-4 xl:grid-cols-[1.55fr_0.72fr_0.62fr]">
             <div>
-              <div className="mb-3 flex flex-wrap gap-2">
-                {timeframes.map((item) => (
-                  <button key={item} onClick={() => setTimeframe(item)} className={`rounded-xl border px-4 py-2 text-sm transition ${item === timeframe ? 'border-blue-400 bg-blue-500/25 text-white shadow-[0_0_24px_rgba(37,99,235,0.45)]' : 'border-cyan-400/10 bg-white/[0.03] text-slate-400 hover:border-cyan-300/40 hover:text-cyan-200'}`} type="button">
-                    {item}
-                  </button>
-                ))}
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <label className="flex min-w-[230px] items-center gap-3 rounded-xl border border-cyan-400/20 bg-black/35 px-4 py-2 text-sm text-slate-300 shadow-[0_0_24px_rgba(0,157,255,0.08)]">
+                  <span className="text-xs uppercase tracking-[0.18em] text-cyan-300">Criptomoneda</span>
+                  <select
+                    value={selectedCrypto}
+                    onChange={(event) => setSelectedCrypto(event.target.value)}
+                    className="min-w-0 flex-1 bg-transparent font-semibold text-white outline-none"
+                  >
+                    {cryptoMarkets.map((market) => (
+                      <option key={market.symbol} value={market.symbol} className="bg-slate-950 text-white">
+                        {market.display} · {market.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {timeframes.map((item) => (
+                    <button key={item} onClick={() => setTimeframe(item)} className={`rounded-xl border px-4 py-2 text-sm transition ${item === timeframe ? 'border-blue-400 bg-blue-500/25 text-white shadow-[0_0_24px_rgba(37,99,235,0.45)]' : 'border-cyan-400/10 bg-white/[0.03] text-slate-400 hover:border-cyan-300/40 hover:text-cyan-200'}`} type="button">
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <CandleChart price={price} support={support} resistance={resistance} timeframe={timeframe} candles={liveCandles} exchange={live?.exchange} />
+              <CandleChart
+                price={price}
+                support={support}
+                resistance={resistance}
+                timeframe={timeframe}
+                candles={liveCandles}
+                exchange={live?.exchange}
+                label={live?.symbol ?? selectedMarket.display}
+                assetName={live?.asset_name ?? selectedMarket.name}
+              />
             </div>
 
             <div className="premium-card p-5">
               <div className="panel-head"><h2>Snapshot de mercado</h2><span>{formatNewYorkTime(live?.updated_at ?? snapshot?.updated_at)}</span></div>
               <div className="divide-y divide-cyan-400/10">
                 {[
-                  ['Precio BTC', formatMoney(price), 'text-emerald-300'],
+                  [`Precio ${live?.asset ?? selectedCrypto}`, formatMoney(price), 'text-emerald-300'],
                   ['Cambio 1H', formatPct(live?.change_1h_pct), (live?.change_1h_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'],
                   ['Soporte', formatMoney(support), 'text-cyan-300'],
                   ['Resistencia', formatMoney(resistance), 'text-rose-300'],

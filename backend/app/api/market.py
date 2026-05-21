@@ -12,8 +12,12 @@ router = APIRouter()
 
 
 @router.get('/live', response_model=MarketLiveResponse)
-async def list_market_live(timeframe: str = Query('1H'), db: AsyncSession = Depends(get_db)):
-    return await get_live_market_status(db, timeframe=timeframe)
+async def list_market_live(
+    timeframe: str = Query('1H'),
+    symbol: str = Query('BTC'),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_live_market_status(db, timeframe=timeframe, symbol=symbol)
 
 
 @router.get('/snapshots', response_model=list[MarketSnapshotResponse])

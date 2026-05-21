@@ -38,10 +38,72 @@ BINANCE_INTERVALS = {
     '1D': '1d',
 }
 
+MARKET_SYMBOLS = {
+    'BTC': {
+        'label': 'Bitcoin',
+        'coinbase': 'BTC-USD',
+        'kraken': 'XBTUSD',
+        'kraken_display': 'XBT-USD',
+        'binance': 'BTCUSDT',
+        'binance_display': 'BTC-USDT',
+    },
+    'ETH': {
+        'label': 'Ethereum',
+        'coinbase': 'ETH-USD',
+        'kraken': 'ETHUSD',
+        'kraken_display': 'ETH-USD',
+        'binance': 'ETHUSDT',
+        'binance_display': 'ETH-USDT',
+    },
+    'SOL': {
+        'label': 'Solana',
+        'coinbase': 'SOL-USD',
+        'kraken': 'SOLUSD',
+        'kraken_display': 'SOL-USD',
+        'binance': 'SOLUSDT',
+        'binance_display': 'SOL-USDT',
+    },
+    'BCH': {
+        'label': 'Bitcoin Cash',
+        'coinbase': 'BCH-USD',
+        'kraken': 'BCHUSD',
+        'kraken_display': 'BCH-USD',
+        'binance': 'BCHUSDT',
+        'binance_display': 'BCH-USDT',
+    },
+    'LTC': {
+        'label': 'Litecoin',
+        'coinbase': 'LTC-USD',
+        'kraken': 'LTCUSD',
+        'kraken_display': 'LTC-USD',
+        'binance': 'LTCUSDT',
+        'binance_display': 'LTC-USDT',
+    },
+}
+
 
 def _normalize_timeframe(timeframe: str | None) -> str:
     normalized = (timeframe or '1H').strip().upper()
     return normalized if normalized in TIMEFRAME_SECONDS else '1H'
+
+
+def _normalize_asset(symbol: str | None) -> str:
+    normalized = (symbol or 'BTC').strip().upper()
+    aliases = {
+        'XBT': 'BTC',
+        'BTCUSD': 'BTC',
+        'BTCUSDT': 'BTC',
+        'ETHUSD': 'ETH',
+        'ETHUSDT': 'ETH',
+        'SOLUSD': 'SOL',
+        'SOLUSDT': 'SOL',
+        'BCHUSD': 'BCH',
+        'BCHUSDT': 'BCH',
+        'LTCUSD': 'LTC',
+        'LTCUSDT': 'LTC',
+    }
+    normalized = aliases.get(normalized.replace('-', '').replace('/', ''), normalized)
+    return normalized if normalized in MARKET_SYMBOLS else 'BTC'
 
 
 def _iso_from_timestamp(value: object) -> str:
@@ -166,14 +228,16 @@ def _indicators(candles: list[dict[str, float | str]]) -> dict[str, float]:
     }
 
 
-def _coinbase_live_price(timeframe: str) -> dict[str, object]:
-    ticker = requests.get(f'{COINBASE_API_URL}/products/BTC-USD/ticker', timeout=TIMEOUT)
+def _coinbase_live_price(timeframe: str, asset: str) -> dict[str, object]:
+    market = MARKET_SYMBOLS[asset]
+    product = market['coinbase']
+    ticker = requests.get(f'{COINBASE_API_URL}/products/{product}/ticker', timeout=TIMEOUT)
     ticker.raise_for_status()
     seconds = TIMEFRAME_SECONDS[timeframe]
     end = datetime.utcnow()
     start = end - timedelta(seconds=seconds * DEFAULT_CANDLE_LIMIT)
     candle_resp = requests.get(
-        f'{COINBASE_API_URL}/products/BTC-USD/candles',
+        f'{COINBASE_API_URL}/products/{product}/candles',
         params={
             'granularity': seconds,
             'start': start.isoformat(),
@@ -206,7 +270,9 @@ def _coinbase_live_price(timeframe: str) -> dict[str, object]:
     support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'exchange': 'coinbase',
-        'symbol': 'BTC-USD',
+        'asset': asset,
+        'asset_name': market['label'],
+        'symbol': product,
         'timeframe': timeframe,
         'price': price,
         'change_1h_pct': round(change_pct, 2),
@@ -218,11 +284,13 @@ def _coinbase_live_price(timeframe: str) -> dict[str, object]:
     }
 
 
-def _binance_live_price(timeframe: str) -> dict[str, object]:
-    price_resp = requests.get(f'{BINANCE_API_URL}/api/v3/ticker/price?symbol=BTCUSDT', timeout=TIMEOUT)
+def _binance_live_price(timeframe: str, asset: str) -> dict[str, object]:
+    market = MARKET_SYMBOLS[asset]
+    product = market['binance']
+    price_resp = requests.get(f'{BINANCE_API_URL}/api/v3/ticker/price?symbol={product}', timeout=TIMEOUT)
     price_resp.raise_for_status()
     candle_resp = requests.get(
-        f'{BINANCE_API_URL}/api/v3/klines?symbol=BTCUSDT&interval={BINANCE_INTERVALS[timeframe]}&limit={DEFAULT_CANDLE_LIMIT}',
+        f'{BINANCE_API_URL}/api/v3/klines?symbol={product}&interval={BINANCE_INTERVALS[timeframe]}&limit={DEFAULT_CANDLE_LIMIT}',
         timeout=TIMEOUT,
     )
     candle_resp.raise_for_status()
@@ -250,7 +318,9 @@ def _binance_live_price(timeframe: str) -> dict[str, object]:
     support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'exchange': 'binance',
-        'symbol': 'BTC-USDT',
+        'asset': asset,
+        'asset_name': market['label'],
+        'symbol': market['binance_display'],
         'timeframe': timeframe,
         'price': price,
         'change_1h_pct': round(change_pct, 2),
@@ -262,8 +332,10 @@ def _binance_live_price(timeframe: str) -> dict[str, object]:
     }
 
 
-def _kraken_live_price(timeframe: str) -> dict[str, object]:
-    response = requests.get(f'{KRAKEN_API_URL}/0/public/Ticker?pair=XBTUSD', timeout=TIMEOUT)
+def _kraken_live_price(timeframe: str, asset: str) -> dict[str, object]:
+    market = MARKET_SYMBOLS[asset]
+    pair = market['kraken']
+    response = requests.get(f'{KRAKEN_API_URL}/0/public/Ticker?pair={pair}', timeout=TIMEOUT)
     response.raise_for_status()
     data = response.json()
     pair_data = next(iter(data.get('result', {}).values()), {})
@@ -271,7 +343,7 @@ def _kraken_live_price(timeframe: str) -> dict[str, object]:
     change_pct = 0.0
     since = int((datetime.utcnow() - timedelta(seconds=TIMEFRAME_SECONDS[timeframe] * DEFAULT_CANDLE_LIMIT)).timestamp())
     ohlc_resp = requests.get(
-        f'{KRAKEN_API_URL}/0/public/OHLC?pair=XBTUSD&interval={KRAKEN_INTERVALS[timeframe]}&since={since}',
+        f'{KRAKEN_API_URL}/0/public/OHLC?pair={pair}&interval={KRAKEN_INTERVALS[timeframe]}&since={since}',
         timeout=TIMEOUT,
     )
     ohlc_resp.raise_for_status()
@@ -297,7 +369,9 @@ def _kraken_live_price(timeframe: str) -> dict[str, object]:
     support, resistance = _support_resistance_from_closes(closes, price)
     return {
         'exchange': 'kraken',
-        'symbol': 'XBT-USD',
+        'asset': asset,
+        'asset_name': market['label'],
+        'symbol': market['kraken_display'],
         'timeframe': timeframe,
         'price': price,
         'change_1h_pct': round(change_pct, 2),
@@ -309,21 +383,22 @@ def _kraken_live_price(timeframe: str) -> dict[str, object]:
     }
 
 
-def fetch_live_market_data(timeframe: str = '1H') -> dict[str, object]:
+def fetch_live_market_data(timeframe: str = '1H', symbol: str = 'BTC') -> dict[str, object]:
     selected_timeframe = _normalize_timeframe(timeframe)
+    selected_asset = _normalize_asset(symbol)
     providers = [_kraken_live_price, _coinbase_live_price, _binance_live_price]
     last_exception = None
     for provider in providers:
         try:
-            return provider(selected_timeframe)
+            return provider(selected_timeframe, selected_asset)
         except Exception as exc:
             last_exception = exc
     raise RuntimeError(f'No live market provider available: {last_exception}')
 
 
-async def get_live_market_status(db: AsyncSession, timeframe: str = '1H') -> dict[str, object]:
+async def get_live_market_status(db: AsyncSession, timeframe: str = '1H', symbol: str = 'BTC') -> dict[str, object]:
     try:
-        market_data = fetch_live_market_data(timeframe)
+        market_data = fetch_live_market_data(timeframe, symbol)
         backend_connected = True
     except Exception as exc:
         raise HTTPException(status_code=503, detail='Market data providers unavailable') from exc
@@ -342,6 +417,8 @@ async def get_live_market_status(db: AsyncSession, timeframe: str = '1H') -> dic
 
     return {
         'symbol': market_data['symbol'],
+        'asset': market_data.get('asset'),
+        'asset_name': market_data.get('asset_name'),
         'exchange': market_data.get('exchange'),
         'timeframe': market_data.get('timeframe'),
         'price': market_data['price'],
