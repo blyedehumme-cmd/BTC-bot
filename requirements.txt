@@ -4,3 +4,6 @@ openai>=1.0.0
 coinbase-advanced-py==1.8.2
 cryptography
 PyJWT
+pandas
+numpy
+matplotlib
