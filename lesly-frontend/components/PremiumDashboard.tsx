@@ -28,6 +28,7 @@ const navItems = ['Dashboard', 'Señales', 'Operaciones', 'Backtesting', 'Riesgo
 const timeframes = ['5M', '15M', '1H', '4H', '1D'];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+const paperStartingBalance = Number(process.env.NEXT_PUBLIC_PAPER_STARTING_BALANCE ?? 5000);
 
 type Candle = {
   open: number;
@@ -375,7 +376,10 @@ export default function PremiumDashboard() {
   const signal = activeSignal?.direction ?? live?.signal ?? 'WAIT';
   const confidence = activeSignal?.confidence_score ?? live?.confidence ?? aiStatus?.confidence ?? 0;
   const risk = activeSignal?.risk_level ?? aiStatus?.risk_level ?? 'Unknown';
-  const pnl = recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
+  const cumulativePnlPct = performance?.equity_curve?.length
+    ? performance.equity_curve[performance.equity_curve.length - 1].equity
+    : recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
+  const paperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
@@ -403,9 +407,9 @@ export default function PremiumDashboard() {
           </header>
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Balance total (papel)" value={formatMoney((performance?.total_trades ?? 0) * 100 + 12458.75)} sub={formatPct(live?.change_1h_pct)} values={spark} tone="green" />
-            <MetricCard label="Equity" value={formatMoney(12845.3 + pnl)} sub={formatPct(performance?.average_return)} values={spark.slice().reverse()} tone="cyan" />
-            <MetricCard label="P&L simulado" value={`${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`} sub="trades cerrados" values={recentTrades.map((trade, i) => (trade.result_pct ?? 0) + i + 8)} tone={pnl >= 0 ? 'green' : 'red'} />
+            <MetricCard label="Balance total (papel)" value={formatMoney(paperStartingBalance)} sub="capital inicial" values={spark} tone="green" />
+            <MetricCard label="Equity" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} values={spark.slice().reverse()} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} />
+            <MetricCard label="P&L simulado" value={formatPct(cumulativePnlPct)} sub="trades cerrados" values={recentTrades.map((trade, i) => (trade.result_pct ?? 0) + i + 8)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} values={[10, 14, 12, confidence || 20, 28, 34]} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} />
             <div className="space-y-2">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
