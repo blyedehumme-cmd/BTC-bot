@@ -48,8 +48,6 @@ services:
         value: BTC,ETH,SOL,BCH,LTC
       - key: MAX_TRADES_PER_DAY
         value: "10"
-      - key: MAX_OPEN_POSITIONS
-        value: "4"
       - key: KRAKEN_PAIR
         value: XBTUSD
       - key: KRAKEN_FUTURES_SYMBOL
