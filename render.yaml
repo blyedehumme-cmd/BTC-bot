@@ -49,7 +49,7 @@ services:
       - key: MAX_TRADES_PER_DAY
         value: "10"
       - key: MAX_OPEN_POSITIONS
-        value: "2"
+        value: "4"
       - key: KRAKEN_PAIR
         value: XBTUSD
       - key: KRAKEN_FUTURES_SYMBOL
