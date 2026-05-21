@@ -39,11 +39,23 @@ services:
         value: "false"
       - key: PRODUCT_ID
         value: BTC-USDC
+      - key: EXCHANGE
+        value: coinbase
+      - key: KRAKEN_PAIR
+        value: XBTUSD
+      - key: KRAKEN_BASE_ASSET
+        value: XXBT
+      - key: KRAKEN_QUOTE_ASSET
+        value: ZUSD
       - key: BACKEND_API_URL
         sync: false
       - key: CB_API_KEY
         sync: false
       - key: CB_API_SECRET
+        sync: false
+      - key: KRAKEN_API_KEY
+        sync: false
+      - key: KRAKEN_API_SECRET
         sync: false
       - key: TELEGRAM_TOKEN
         sync: false

@@ -13,7 +13,8 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
 - Modo `DRY_RUN` para simulación
 - ATR real basado en high/low/close
 - ADX suavizado estilo Wilder
-- Protección contra SHORT real accidental en Coinbase spot
+- Soporte configurable para Coinbase Advanced Trade o Kraken Pro Spot
+- Protección contra SHORT real accidental en exchanges spot
 - Backend opcional: si `BACKEND_API_URL` está vacío, el bot no intenta postear
 
 ## Requisitos
@@ -24,7 +25,12 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
   - `CHAT_ID`
   - `CB_API_KEY`
   - `CB_API_SECRET`
+  - `EXCHANGE` (`coinbase` o `kraken`, por defecto `coinbase`)
   - `PRODUCT_ID` (por defecto `BTC-USDC`)
+  - `KRAKEN_API_KEY`
+  - `KRAKEN_API_SECRET`
+  - `KRAKEN_PAIR` (por defecto `XBTUSD`)
+  - `KRAKEN_QUOTE_ASSET` (por defecto `ZUSD`)
   - `DRY_RUN` (`true` o `false`)
   - `USE_AI_ASSIST` (`true` o `false`)
   - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)
@@ -44,7 +50,21 @@ pip install -r requirements.txt
 python3 btc_bot.py
 ```
 
-El bot valida la configuración y ejecuta el loop principal. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque Coinbase spot no abre posiciones cortas reales.
+El bot valida la configuración y ejecuta el loop principal. En modo `DRY_RUN=true` solo simula órdenes. En modo real, las señales `SHORT` se bloquean por defecto porque spot no abre posiciones cortas reales sin margin/futures.
+
+### Usar Kraken Pro Spot
+
+Para usar Kraken en vez de Coinbase:
+
+```bash
+EXCHANGE=kraken
+KRAKEN_API_KEY=...
+KRAKEN_API_SECRET=...
+KRAKEN_PAIR=XBTUSD
+KRAKEN_QUOTE_ASSET=ZUSD
+```
+
+En Kraken, las órdenes market usan `volume` del activo base. El bot calcula el tamaño en BTC y lo envía como volumen base.
 
 Telegram puede enviar notificaciones sin polling. Para evitar `telegram.error.Conflict: terminated by other getUpdates request` en Render, deja:
 

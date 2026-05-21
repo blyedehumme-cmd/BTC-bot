@@ -15,6 +15,9 @@ Notas de seguridad:
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import math
@@ -24,6 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlencode
 
 import requests
 from coinbase.rest import RESTClient
@@ -39,7 +43,14 @@ CHAT_ID = os.getenv("CHAT_ID", "").strip()
 TELEGRAM_POLLING_ENABLED = os.getenv("TELEGRAM_POLLING_ENABLED", "false").lower().strip() == "true"
 CB_API_KEY = os.getenv("CB_API_KEY", "").strip()
 CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
+EXCHANGE = os.getenv("EXCHANGE", "coinbase").strip().lower()
 PRODUCT_ID = os.getenv("PRODUCT_ID", "BTC-USDC").strip()
+KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "").strip()
+KRAKEN_API_SECRET = os.getenv("KRAKEN_API_SECRET", "").strip()
+KRAKEN_PAIR = os.getenv("KRAKEN_PAIR", "XBTUSD").strip()
+KRAKEN_BASE_ASSET = os.getenv("KRAKEN_BASE_ASSET", "XXBT").strip()
+KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
+KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
@@ -83,6 +94,13 @@ TIMEFRAMES = {
     "4H": "FOUR_HOUR",
     "1D": "ONE_DAY",
     "1W": "ONE_WEEK",
+}
+
+KRAKEN_INTERVALS = {
+    "1H": 60,
+    "4H": 240,
+    "1D": 1440,
+    "1W": 10080,
 }
 
 CANDLE_SECONDS = {
@@ -246,6 +264,51 @@ def get_client() -> RESTClient:
     return client
 
 
+def selected_symbol() -> str:
+    return KRAKEN_PAIR if EXCHANGE == "kraken" else PRODUCT_ID
+
+
+def exchange_credentials_available() -> bool:
+    if EXCHANGE == "kraken":
+        return bool(KRAKEN_API_KEY and KRAKEN_API_SECRET)
+    return bool(CB_API_KEY and CB_API_SECRET)
+
+
+def kraken_private_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not KRAKEN_API_KEY or not KRAKEN_API_SECRET:
+        raise RuntimeError("Faltan KRAKEN_API_KEY o KRAKEN_API_SECRET.")
+
+    path = f"/0/private/{endpoint}"
+    nonce = str(int(time.time() * 1000))
+    data = {"nonce": nonce, **payload}
+    post_data = urlencode(data)
+    encoded = (nonce + post_data).encode("utf-8")
+    message = path.encode("utf-8") + hashlib.sha256(encoded).digest()
+    signature = hmac.new(base64.b64decode(KRAKEN_API_SECRET), message, hashlib.sha512)
+    headers = {
+        "API-Key": KRAKEN_API_KEY,
+        "API-Sign": base64.b64encode(signature.digest()).decode("utf-8"),
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    response = requests.post(f"{KRAKEN_API_URL}{path}", headers=headers, data=post_data, timeout=20)
+    response.raise_for_status()
+    body = response.json()
+    errors = body.get("error") or []
+    if errors:
+        raise RuntimeError(f"Kraken API error: {errors}")
+    return body.get("result", {})
+
+
+def kraken_public_request(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    response = requests.get(f"{KRAKEN_API_URL}/0/public/{endpoint}", params=params, timeout=20)
+    response.raise_for_status()
+    body = response.json()
+    errors = body.get("error") or []
+    if errors:
+        raise RuntimeError(f"Kraken public API error: {errors}")
+    return body.get("result", {})
+
+
 def _backend_url(path: str) -> str:
     clean = path.strip("/")
     return f"{BACKEND_API_URL}/{clean}/"
@@ -294,9 +357,32 @@ def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
 
 
 def get_timeframe_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
-    if DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
+    if DRY_RUN and not exchange_credentials_available():
         logger.info("mock_candles timeframe=%s limit=%s", timeframe, limit)
         return generate_mock_candles(timeframe, limit)
+
+    if EXCHANGE == "kraken":
+        since = int(time.time()) - (limit * CANDLE_SECONDS[timeframe])
+
+        def fetch_kraken() -> Dict[str, Any]:
+            return kraken_public_request("OHLC", {"pair": KRAKEN_PAIR, "interval": KRAKEN_INTERVALS[timeframe], "since": since})
+
+        data = retry_with_backoff(fetch_kraken)
+        pair_key = next((key for key in data.keys() if key != "last"), "")
+        rows = data.get(pair_key, []) if pair_key else []
+        result = []
+        for row in rows[-limit:]:
+            if len(row) < 7:
+                continue
+            result.append({
+                "start": int(float(row[0])),
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[6]),
+            })
+        return sorted(result, key=lambda item: int(item.get("start", 0)))
 
     end_ts = int(time.time())
     start_ts = end_ts - (limit * CANDLE_SECONDS[timeframe])
@@ -335,6 +421,13 @@ def get_usdc_balance() -> float:
     if DRY_RUN:
         return DRY_RUN_BALANCE + state.stats.simulated_pnl_usd
 
+    if EXCHANGE == "kraken":
+        def fetch_kraken_balance() -> Dict[str, Any]:
+            return kraken_private_request("Balance", {})
+
+        balances = retry_with_backoff(fetch_kraken_balance)
+        return float(balances.get(KRAKEN_QUOTE_ASSET, 0.0))
+
     def fetch() -> Any:
         return get_client().get_accounts()
 
@@ -360,6 +453,28 @@ def place_market_order(side: str, quote_size: Optional[float] = None, base_size:
     if DRY_RUN:
         logger.info("paper_order side=%s quote_size=%s base_size=%s", side, quote_size, base_size)
         return {"dry_run": True, "side": side, "quote_size": quote_size, "base_size": base_size}
+
+    if EXCHANGE == "kraken":
+        def place_kraken() -> Dict[str, Any]:
+            volume = base_size
+            if volume is None and quote_size is not None:
+                recent = get_timeframe_candles("1H", 2)
+                last_price = float(recent[-1]["close"]) if recent else 0.0
+                if last_price <= 0:
+                    raise RuntimeError("No se pudo convertir quote_size a volumen base para Kraken.")
+                volume = float(quote_size) / last_price
+            if volume is None or float(volume) <= 0:
+                raise RuntimeError("Kraken requiere base_size/volume positivo para orden market.")
+            return kraken_private_request("AddOrder", {
+                "pair": KRAKEN_PAIR,
+                "type": side.lower(),
+                "ordertype": "market",
+                "volume": f"{float(volume):.8f}",
+            })
+
+        response = retry_with_backoff(place_kraken)
+        logger.info("live_order_submitted exchange=kraken side=%s pair=%s", side, KRAKEN_PAIR)
+        return {"exchange": "kraken", "raw_response": response}
 
     def place() -> Any:
         cb = get_client()
@@ -849,7 +964,7 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     support = max(0.0, price - atr_value * 1.5) if atr_value > 0 else price * 0.995
     resistance = price + atr_value * 1.5 if atr_value > 0 else price * 1.005
     return {
-        "symbol": PRODUCT_ID,
+        "symbol": selected_symbol(),
         "timeframe": "1H",
         "price": price,
         "trend": hourly.get("trend", "neutral"),
@@ -864,7 +979,7 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     confidence = int(round(float(analysis.get("confidence", 0.0)) * 100))
     direction = analysis.get("signal", "WAIT")
     return {
-        "symbol": PRODUCT_ID,
+        "symbol": selected_symbol(),
         "timeframe": "1H",
         "direction": direction,
         "confidence_score": max(0, min(confidence, 100)),
@@ -1104,7 +1219,8 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Estado del bot\n"
         f"Activo: {state.active}\n"
         f"DRY_RUN: {DRY_RUN}\n"
-        f"Producto: {PRODUCT_ID}\n"
+        f"Exchange: {EXCHANGE}\n"
+        f"Producto: {selected_symbol()}\n"
         f"Posicion abierta: {state.position_open}\n"
         f"Side: {state.side}\n"
         f"Entrada: {state.entry_price:.2f}\n"
@@ -1120,7 +1236,8 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Configuracion\n"
-        f"Producto: {PRODUCT_ID}\n"
+        f"Exchange: {EXCHANGE}\n"
+        f"Producto: {selected_symbol()}\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
         f"IA asistida: {USE_AI_ASSIST}\n"
@@ -1160,7 +1277,7 @@ async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # =========================
 
 async def trading_loop(app: Optional[Application]) -> None:
-    await send_telegram(app, f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Producto={PRODUCT_ID}")
+    await send_telegram(app, f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Exchange={EXCHANGE} Producto={selected_symbol()}")
     while True:
         try:
             analysis = analyze_market()
@@ -1220,8 +1337,8 @@ async def trading_loop(app: Optional[Application]) -> None:
 
             elif can_trade_now() and state.last_signal in ["LONG", "SHORT"]:
                 if not DRY_RUN and state.last_signal == "SHORT" and not ALLOW_REAL_SPOT_SHORT:
-                    logger.warning("blocked_real_short product=%s", PRODUCT_ID)
-                    await send_telegram(app, "Senal SHORT bloqueada: Coinbase spot no abre short real.")
+                    logger.warning("blocked_real_short exchange=%s symbol=%s", EXCHANGE, selected_symbol())
+                    await send_telegram(app, "Senal SHORT bloqueada: spot no abre short real sin margin/futures.")
                 elif state.daily_trades >= MAX_TRADES_PER_DAY:
                     logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
                 else:
@@ -1241,7 +1358,7 @@ async def trading_loop(app: Optional[Application]) -> None:
                         place_market_order(
                             order_side,
                             quote_size=usd_size if order_side == "BUY" else None,
-                            base_size=None if order_side == "BUY" else btc_size,
+                            base_size=btc_size,
                         )
                         state.position_open = True
                         state.side = state.last_signal
@@ -1280,10 +1397,12 @@ async def post_init(app: Application) -> None:
 
 
 def validate_config() -> None:
-    if not DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
-        raise RuntimeError("Faltan CB_API_KEY o CB_API_SECRET.")
-    if DRY_RUN and (not CB_API_KEY or not CB_API_SECRET):
-        logger.warning("dry_run_mock_market enabled=true reason=missing_coinbase_credentials")
+    if EXCHANGE not in ["coinbase", "kraken"]:
+        raise RuntimeError("EXCHANGE debe ser coinbase o kraken.")
+    if not DRY_RUN and not exchange_credentials_available():
+        raise RuntimeError(f"Faltan credenciales para EXCHANGE={EXCHANGE}.")
+    if DRY_RUN and not exchange_credentials_available():
+        logger.warning("dry_run_mock_market enabled=true exchange=%s reason=missing_exchange_credentials", EXCHANGE)
     if not DRY_RUN and ALLOW_REAL_SPOT_SHORT:
         logger.warning("allow_real_spot_short enabled=true")
     if TELEGRAM_TOKEN and not CHAT_ID:
@@ -1299,7 +1418,7 @@ def validate_config() -> None:
 def main() -> None:
     validate_config()
     load_state()
-    if not DRY_RUN:
+    if not DRY_RUN and EXCHANGE == "coinbase":
         get_client()
 
     use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID and TELEGRAM_POLLING_ENABLED)
@@ -1313,7 +1432,7 @@ def main() -> None:
         app.add_handler(CommandHandler("stats", stats_cmd))
         app.add_handler(CommandHandler("signal", signal_cmd))
 
-    logger.info("startup dry_run=%s telegram_polling=%s product=%s", DRY_RUN, use_telegram, PRODUCT_ID)
+    logger.info("startup dry_run=%s telegram_polling=%s exchange=%s symbol=%s", DRY_RUN, use_telegram, EXCHANGE, selected_symbol())
     if use_telegram:
         app.run_polling(drop_pending_updates=True)
     else:
