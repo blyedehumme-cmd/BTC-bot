@@ -16,8 +16,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: true,
 });
 
-function parseDashboardDate(value?: string | null): Date | null {
+function parseDashboardDate(value?: string | Date | null): Date | null {
   if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
 
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -30,12 +33,12 @@ function parseDashboardDate(value?: string | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatNewYorkTime(value?: string | null): string {
+export function formatNewYorkTime(value?: string | Date | null): string {
   const date = parseDashboardDate(value);
-  return date ? timeFormatter.format(date) : value || '—';
+  return date ? timeFormatter.format(date) : typeof value === 'string' ? value : '—';
 }
 
-export function formatNewYorkDateTime(value?: string | null): string {
+export function formatNewYorkDateTime(value?: string | Date | null): string {
   const date = parseDashboardDate(value);
-  return date ? dateTimeFormatter.format(date) : value || '—';
+  return date ? dateTimeFormatter.format(date) : typeof value === 'string' ? value : '—';
 }

@@ -56,6 +56,17 @@ function latest<T>(items?: T[] | null): T | null {
   return items && items.length > 0 ? items[items.length - 1] : null;
 }
 
+function useLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return now;
+}
+
 function makeCandles(price: number, support?: number, resistance?: number, seed = 1): Candle[] {
   if (!price || !Number.isFinite(price)) return [];
   const floor = support && support > 0 ? support : price * 0.985;
@@ -157,7 +168,7 @@ function MetricCard({ label, value, sub, tone = 'cyan', values }: { label: strin
   );
 }
 
-function Sidebar({ botActive }: { botActive: boolean }) {
+function Sidebar({ botActive, liveNow }: { botActive: boolean; liveNow: Date }) {
   return (
     <aside className="premium-card sticky top-4 hidden h-[calc(100vh-2rem)] w-[250px] shrink-0 overflow-hidden p-4 xl:block">
       <div className="mb-8 flex items-center gap-3 px-2 pt-2">
@@ -181,6 +192,10 @@ function Sidebar({ botActive }: { botActive: boolean }) {
       <div className={`absolute bottom-4 left-4 right-4 rounded-2xl border p-4 ${botActive ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-rose-400/20 bg-rose-500/10'}`}>
         <div className={`flex items-center gap-2 text-sm font-semibold ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}><span className={`h-3 w-3 rounded-full ${botActive ? 'bg-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.9)]' : 'bg-rose-400 shadow-[0_0_18px_rgba(244,63,94,0.9)]'}`} /> {botActive ? 'BOT ACTIVO' : 'BOT PAUSADO'}</div>
         <p className="mt-2 text-xs text-slate-400">Modo papel · backend live</p>
+        <div className="mt-3 rounded-xl border border-cyan-400/10 bg-black/25 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Hora NY live</p>
+          <p className="text-lg font-semibold text-cyan-200">{formatNewYorkTime(liveNow)}</p>
+        </div>
       </div>
     </aside>
   );
@@ -228,6 +243,7 @@ export default function PremiumDashboard() {
   const [botControl, setBotControl] = useState<BotControl | null>(null);
   const [botActionBusy, setBotActionBusy] = useState(false);
   const [botActionMessage, setBotActionMessage] = useState('');
+  const liveNow = useLiveClock();
   const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(), []), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
   const { data: signals } = usePolling<Signal[]>(useCallback(() => fetchSignals(), []), 4000);
@@ -277,13 +293,13 @@ export default function PremiumDashboard() {
       <div className="energy-line energy-line-a" />
       <div className="energy-line energy-line-b" />
       <div className="relative z-10 flex gap-4 p-3 sm:p-4">
-        <Sidebar botActive={botActive} />
+        <Sidebar botActive={botActive} liveNow={liveNow} />
         <section className="min-w-0 flex-1 space-y-4">
           <header className="xl:hidden">
             <div className="premium-card flex items-center justify-between gap-4 p-4 xl:hidden">
               <div>
                 <p className="text-2xl font-bold text-white">LESLY</p>
-                <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">AI Trading Bot</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">NY live · {formatNewYorkTime(liveNow)}</p>
               </div>
               <span className={`rounded-full border px-3 py-1 text-xs ${botActive ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-rose-400/30 bg-rose-400/10 text-rose-300'}`}>
                 {botActive ? 'Activo' : 'Pausado'}
@@ -299,7 +315,7 @@ export default function PremiumDashboard() {
             <div className="space-y-2">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
               <p className={`px-2 text-xs ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {botActionMessage || (botActive ? 'Bot activo: puede abrir operaciones paper.' : 'Bot pausado: no abrirá nuevas operaciones.')}
+                {botActionMessage || (botActive ? 'Bot activo: puede abrir operaciones paper.' : 'Bot pausado: no abrirá nuevas operaciones.')} · NY {formatNewYorkTime(liveNow)}
               </p>
             </div>
           </section>
