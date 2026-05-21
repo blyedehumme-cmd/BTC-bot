@@ -54,7 +54,7 @@ KRAKEN_BASE_ASSET = os.getenv("KRAKEN_BASE_ASSET", "XXBT").strip()
 KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
 KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
 KRAKEN_FUTURES_API_URL = os.getenv("KRAKEN_FUTURES_API_URL", "https://futures.kraken.com").strip().rstrip("/")
-WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC,ETH,SOL,BCH,LTC").split(",") if item.strip()]
+WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC").split(",") if item.strip()]
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
@@ -63,19 +63,19 @@ USE_CLOSED_CANDLES = os.getenv("USE_CLOSED_CANDLES", "true").lower().strip() == 
 MAX_ALLOWED_LEVERAGE = 3.0
 MAX_LEVERAGE = max(1.0, min(float(os.getenv("MAX_LEVERAGE", "3.0")), MAX_ALLOWED_LEVERAGE))
 
-MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.0125"))
+MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.05"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.70"))
-MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "60"))
-MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
+MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "240"))
+MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
 ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
-MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
+MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "1.0"))
 MAX_OPEN_POSITIONS = 4
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
-ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "1.5"))
+ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "3.0"))
 
 USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "false").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
@@ -92,8 +92,9 @@ MACD_FAST = 21
 MACD_SLOW = 50
 MACD_SIGNAL = 10
 ADX_PERIOD = 14
-ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "20.0"))
-VOLUME_HEALTH_MIN = float(os.getenv("VOLUME_HEALTH_MIN", "0.65"))
+ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "24.0"))
+VOLUME_HEALTH_MIN = float(os.getenv("VOLUME_HEALTH_MIN", "0.60"))
+REQUIRE_MTF_MACD_CONFIRM = os.getenv("REQUIRE_MTF_MACD_CONFIRM", "true").lower().strip() == "true"
 AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
 MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
 
@@ -306,7 +307,11 @@ def sync_position_from_state(position: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def active_positions() -> List[Dict[str, Any]]:
-    state.positions = [pos for pos in state.positions if pos.get("side") in ["LONG", "SHORT"]]
+    state.positions = [
+        pos
+        for pos in state.positions
+        if pos.get("side") in ["LONG", "SHORT"] and str(pos.get("symbol", "")).upper() in WATCHLIST
+    ]
     return state.positions
 
 
@@ -1004,6 +1009,12 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             (fourh["trend"] == "bull", 0.24, "4H bullish", "4H no confirma LONG"),
             (hourly["trend"] == "bull", 0.12, "1H bullish", "1H no confirma LONG"),
             (hourly["macd"]["hist"] > 0, 0.12, "MACD 1H positivo", "MACD 1H no confirma LONG"),
+            (
+                not REQUIRE_MTF_MACD_CONFIRM or (daily["macd"]["hist"] > 0 and fourh["macd"]["hist"] > 0),
+                0.00,
+                "MACD 4H/1D confirma LONG",
+                "MACD 4H/1D no confirma LONG",
+            ),
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
             (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
@@ -1014,6 +1025,12 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             (fourh["trend"] == "bear", 0.24, "4H bearish", "4H no confirma SHORT"),
             (hourly["trend"] == "bear", 0.12, "1H bearish", "1H no confirma SHORT"),
             (hourly["macd"]["hist"] < 0, 0.12, "MACD 1H negativo", "MACD 1H no confirma SHORT"),
+            (
+                not REQUIRE_MTF_MACD_CONFIRM or (daily["macd"]["hist"] < 0 and fourh["macd"]["hist"] < 0),
+                0.00,
+                "MACD 4H/1D confirma SHORT",
+                "MACD 4H/1D no confirma SHORT",
+            ),
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
             (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
@@ -1537,6 +1554,7 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"IA asistida: {USE_AI_ASSIST}\n"
         f"ADX threshold: {ADX_THRESHOLD:.2f}\n"
         f"Volumen minimo: {VOLUME_HEALTH_MIN:.2f}x\n"
+        f"MACD MTF obligatorio: {REQUIRE_MTF_MACD_CONFIRM}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"

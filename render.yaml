@@ -45,9 +45,23 @@ services:
       - key: MAX_LEVERAGE
         value: "3"
       - key: WATCHLIST
-        value: BTC,ETH,SOL,BCH,LTC
+        value: BTC
       - key: MAX_TRADES_PER_DAY
-        value: "10"
+        value: "3"
+      - key: MIN_MINUTES_BETWEEN_TRADES
+        value: "240"
+      - key: MAX_RISK_PER_TRADE
+        value: "0.05"
+      - key: MAX_POSITION_BALANCE_PCT
+        value: "1.0"
+      - key: ADX_THRESHOLD
+        value: "24"
+      - key: VOLUME_HEALTH_MIN
+        value: "0.60"
+      - key: ATR_TRAILING_MULTIPLIER
+        value: "3.0"
+      - key: REQUIRE_MTF_MACD_CONFIRM
+        value: "true"
       - key: KRAKEN_PAIR
         value: XBTUSD
       - key: KRAKEN_FUTURES_SYMBOL

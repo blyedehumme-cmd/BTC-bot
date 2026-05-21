@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ START_TS = int(datetime(2021, 1, 1, tzinfo=timezone.utc).timestamp())
 NOW = int(time.time())
 
 INITIAL = 5000.0
-FEE_RATE = 0.0005
+FEE_RATE = float(os.getenv("PORTFOLIO_FEE_RATE", "0.0005"))
 MAX_OPEN = 4
 MAX_TRADES_DAY = 10
 MAX_RISK = 0.0125
