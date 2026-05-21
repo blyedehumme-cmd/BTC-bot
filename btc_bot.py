@@ -70,8 +70,9 @@ MACD_FAST = 21
 MACD_SLOW = 50
 MACD_SIGNAL = 10
 ADX_PERIOD = 14
-ADX_THRESHOLD = 23.0
+ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "23.0"))
 VOLUME_HEALTH_MIN = 0.75
+AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -575,6 +576,18 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         return {}
 
 
+def _ai_not_called(reason: str, score: float = 0.0) -> Dict[str, Any]:
+    return {
+        "allow": True,
+        "score": score,
+        "called_openai": False,
+        "rate_limited": False,
+        "reasons": [reason],
+        "openai": {},
+        "openai_explanation": reason,
+    }
+
+
 def _format_analysis_block(label: str, data: Dict[str, Any]) -> str:
     return (
         f"{label}: trend={data['trend']}, price={data['price']}, ema21={data['ema21']}, "
@@ -610,6 +623,17 @@ def _openai_assist(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[st
         }
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
         response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=20)
+        if response.status_code == 429:
+            logger.warning("openai_rate_limited status=429 fallback=WAIT")
+            return {
+                "allow": False,
+                "rate_limited": True,
+                "validation": "OpenAI rate limit 429. Fallback seguro a WAIT para evitar sobreoperar.",
+                "signal_reason": "No se aprueba entrada porque la validacion IA no estuvo disponible.",
+                "risk_summary": "Riesgo operacional alto por rate limit.",
+                "market_summary": "Analisis IA omitido por limite de tasa.",
+                "extra_reasons": ["Reducir frecuencia de llamadas o subir limites antes de operar con IA."],
+            }
         response.raise_for_status()
         text = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
         return _extract_json_object(text)
@@ -618,10 +642,18 @@ def _openai_assist(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[st
         return retry_with_backoff(call)
     except Exception as exc:
         logger.warning("openai_assist_failed error=%s", exc)
-        return {}
+        return {
+            "allow": False,
+            "openai_error": str(exc),
+            "validation": "OpenAI no estuvo disponible. Fallback seguro a WAIT.",
+            "signal_reason": "No se aprueba entrada porque fallo la validacion IA.",
+            "risk_summary": "Riesgo operacional alto por error de IA.",
+            "market_summary": "Analisis IA no disponible.",
+            "extra_reasons": [],
+        }
 
 
-def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
+def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any], direction: str = "") -> Dict[str, Any]:
     score = 0.0
     reasons: List[str] = []
     checks = [
@@ -639,7 +671,9 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
             reasons.append(bad_reason)
 
     allow = score >= 0.60
-    openai_feedback = _openai_assist(weekly, daily, fourh, hourly)
+    openai_feedback = _openai_assist(weekly, daily, fourh, hourly, direction)
+    called_openai = bool(USE_AI_ASSIST and OPENAI_API_KEY)
+    openai_explanation_parts: List[str] = []
     if openai_feedback:
         openai_allow = openai_feedback.get("allow")
         if isinstance(openai_allow, bool):
@@ -653,14 +687,32 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
             value = openai_feedback.get(key)
             if value:
                 reasons.append(f"{prefix}: {value}")
+                openai_explanation_parts.append(f"{prefix}: {value}")
         extra = openai_feedback.get("extra_reasons")
         if isinstance(extra, list):
-            reasons.extend(f"IA extra: {item}" for item in extra if isinstance(item, str) and item.strip())
-    return {"allow": allow, "score": score, "reasons": reasons, "openai": openai_feedback}
+            for item in extra:
+                if isinstance(item, str) and item.strip():
+                    reasons.append(f"IA extra: {item}")
+                    openai_explanation_parts.append(f"IA extra: {item}")
+    elif called_openai:
+        allow = False
+        reasons.append("IA no devolvio respuesta util. Fallback seguro a WAIT")
+        openai_explanation_parts.append("IA no devolvio respuesta util. Fallback seguro a WAIT")
+
+    openai_explanation = " | ".join(openai_explanation_parts) if openai_explanation_parts else "OpenAI no fue llamado."
+    return {
+        "allow": allow,
+        "score": score,
+        "reasons": reasons,
+        "openai": openai_feedback,
+        "called_openai": called_openai,
+        "rate_limited": bool(openai_feedback.get("rate_limited")) if isinstance(openai_feedback, dict) else False,
+        "openai_explanation": openai_explanation,
+    }
 
 
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
-    candidates = [
+    candidate_checks = [
         ("LONG", [
             (weekly["trend"] in ["bull", "neutral"] and weekly["price"] >= weekly["ema100"], 0.18, "1W bullish/neutral"),
             (daily["trend"] == "bull", 0.20, "1D bullish"),
@@ -679,35 +731,91 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         ]),
     ]
 
-    ai_evaluation = ai_assist_analysis(weekly, daily, fourh, hourly)
-    ai_reason = f"IA: {'|'.join(ai_evaluation['reasons'])}" if USE_AI_ASSIST else "IA desactivada"
     atr_value = hourly.get("atr", 0.0) or abs(hourly["price"] - hourly["ema21"]) or abs(hourly["price"] - hourly["ema50"])
-    best = {"signal": "WAIT", "confidence": 0.0, "reason": f"No se cumplen condiciones multi-timeframe. {ai_reason}", "price": hourly["price"], "atr": atr_value}
-
-    for direction, checks in candidates:
+    candidates: List[Dict[str, Any]] = []
+    for direction, checks in candidate_checks:
         confidence = 0.0
         reasons: List[str] = []
         for passed, weight, reason in checks:
             if passed:
                 confidence += weight
                 reasons.append(reason)
+        candidates.append({"direction": direction, "confidence": confidence, "reasons": reasons})
 
-        if confidence <= best["confidence"]:
-            continue
-        if confidence < MIN_CONFIDENCE or not ai_quality_filter(hourly):
-            best = {"signal": "WAIT", "confidence": confidence, "reason": f"Falta calidad para {direction}. {ai_reason}", "price": hourly["price"], "atr": atr_value}
-            continue
-        if USE_AI_ASSIST and not ai_evaluation["allow"]:
-            best = {"signal": "WAIT", "confidence": confidence, "reason": f"Falto confirmacion IA: {', '.join(ai_evaluation['reasons'])}", "price": hourly["price"], "atr": atr_value}
-            continue
+    best_candidate = max(candidates, key=lambda item: float(item["confidence"]))
+    best_direction = str(best_candidate["direction"])
+    best_confidence = float(best_candidate["confidence"])
+    quality_ok = ai_quality_filter(hourly)
+    near_confidence = best_confidence >= max(0.0, MIN_CONFIDENCE - AI_CONFIDENCE_BUFFER)
 
-        feedback = ai_evaluation.get("openai") or {}
-        approved_direction = str(feedback.get("approved_direction", "")).upper()
-        if feedback and approved_direction not in ["", direction]:
-            best = {"signal": "WAIT", "confidence": confidence, "reason": f"OpenAI rechazo {direction}: {feedback}", "price": hourly["price"], "atr": atr_value}
-            continue
-        best = {"signal": direction, "confidence": confidence, "reason": ", ".join(reasons) + ". " + ai_reason, "price": hourly["price"], "atr": atr_value}
-    return best
+    if not USE_AI_ASSIST:
+        ai_evaluation = _ai_not_called("IA desactivada.", best_confidence)
+        ai_reason = "IA desactivada"
+    elif not near_confidence:
+        ai_evaluation = _ai_not_called(
+            f"OpenAI no llamado: confianza {best_confidence:.2f} debajo de zona cercana a MIN_CONFIDENCE {MIN_CONFIDENCE:.2f}.",
+            best_confidence,
+        )
+        ai_reason = f"IA omitida: {'|'.join(ai_evaluation['reasons'])}"
+    elif not quality_ok:
+        ai_evaluation = _ai_not_called(
+            f"OpenAI no llamado: filtro basico ADX/volumen no aceptable (ADX={hourly['adx']:.2f}, volumen={hourly['volume_ratio']:.2f}).",
+            best_confidence,
+        )
+        ai_reason = f"IA omitida: {'|'.join(ai_evaluation['reasons'])}"
+    else:
+        ai_evaluation = ai_assist_analysis(weekly, daily, fourh, hourly, best_direction)
+        ai_reason = f"IA: {'|'.join(ai_evaluation['reasons'])}"
+
+    base = {
+        "price": hourly["price"],
+        "atr": atr_value,
+        "ai_called": ai_evaluation.get("called_openai", False),
+        "ai_rate_limited": ai_evaluation.get("rate_limited", False),
+        "ai_explanation": ai_evaluation.get("openai_explanation", ""),
+        "ai_feedback": ai_evaluation.get("openai", {}),
+    }
+
+    if best_confidence < MIN_CONFIDENCE:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"No se cumplen condiciones multi-timeframe para {best_direction}. {ai_reason}",
+        }
+
+    if not quality_ok:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"Falta calidad ADX/volumen para {best_direction}. {ai_reason}",
+        }
+
+    if USE_AI_ASSIST and ai_evaluation.get("called_openai") and not ai_evaluation["allow"]:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"Falto confirmacion IA para {best_direction}: {', '.join(ai_evaluation['reasons'])}",
+        }
+
+    feedback = ai_evaluation.get("openai") or {}
+    approved_direction = str(feedback.get("approved_direction", "")).upper()
+    if feedback and approved_direction not in ["", best_direction]:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"OpenAI rechazo {best_direction}: {ai_evaluation.get('openai_explanation', feedback)}",
+        }
+
+    return {
+        **base,
+        "signal": best_direction,
+        "confidence": best_confidence,
+        "reason": ", ".join(best_candidate["reasons"]) + ". " + ai_reason,
+    }
 
 
 def analyze_market() -> Dict[str, Any]:
@@ -772,6 +880,9 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
     direction = analysis.get("signal", "WAIT")
     reason = analysis.get("reason", "No reason provided.")
     hourly = analysis.get("hourly", {})
+    ai_called = bool(analysis.get("ai_called", False))
+    ai_rate_limited = bool(analysis.get("ai_rate_limited", False))
+    ai_explanation = str(analysis.get("ai_explanation") or "").strip()
     snapshot = {
         "signal": direction,
         "confidence": analysis.get("confidence", 0.0),
@@ -779,13 +890,29 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
         "adx": hourly.get("adx"),
         "volume_ratio": hourly.get("volume_ratio"),
         "atr": hourly.get("atr"),
+        "ai_called": ai_called,
+        "ai_rate_limited": ai_rate_limited,
+        "ai_feedback": analysis.get("ai_feedback", {}),
     }
+    if ai_rate_limited:
+        decision_type = "ai_rate_limited"
+    elif direction in ["LONG", "SHORT"]:
+        decision_type = "signal_approved"
+    elif ai_called and "confirmacion IA" in reason:
+        decision_type = "ai_rejected"
+    else:
+        decision_type = "analysis_wait"
+
+    backend_explanation = reason
+    if ai_called and ai_explanation:
+        backend_explanation = f"{reason}\n\nExplicacion IA real: {ai_explanation}"
+
     return {
         "signal_id": signal_id,
-        "decision_type": "signal_approved" if direction in ["LONG", "SHORT"] else "ai_rejected" if "confirmacion IA" in reason else "analysis_wait",
+        "decision_type": decision_type,
         "reason": f"{direction}: {reason[:200]}",
         "condition_snapshot": json.dumps(snapshot),
-        "explanation": reason,
+        "explanation": backend_explanation,
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
