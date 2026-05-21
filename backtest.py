@@ -21,18 +21,28 @@ from indicators import add_indicators
 from report import generate_outputs
 
 
-INITIAL_CAPITAL = 5000.0
-MIN_CONFIDENCE = 0.70
-ADX_THRESHOLD = 20.0
-VOLUME_HEALTH_MIN = 0.65
-MIN_MINUTES_BETWEEN_TRADES = 60
-MAX_TRADES_PER_DAY = 3
-MAX_RISK_PER_TRADE = 0.0125
-MAX_POSITION_BALANCE_PCT = 0.25
-KRAKEN_FEE_RATE = 0.0026
-ATR_STOP_MULTIPLIER = 1.5
-ATR_TAKE_PROFIT_MULTIPLIER = 3.0
-ATR_TRAILING_MULTIPLIER = 1.5
+BACKTEST_PROFILE = os.getenv("BACKTEST_PROFILE", "improved").lower().strip()
+INITIAL_CAPITAL = float(os.getenv("BACKTEST_INITIAL_CAPITAL", "5000"))
+MIN_CONFIDENCE = float(os.getenv("BACKTEST_MIN_CONFIDENCE", "0.70"))
+ADX_THRESHOLD = float(os.getenv("BACKTEST_ADX_THRESHOLD", "20.0"))
+VOLUME_HEALTH_MIN = float(os.getenv("BACKTEST_VOLUME_HEALTH_MIN", "0.65"))
+MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("BACKTEST_MIN_MINUTES_BETWEEN_TRADES", "60"))
+MAX_TRADES_PER_DAY = int(os.getenv("BACKTEST_MAX_TRADES_PER_DAY", "3"))
+MAX_RISK_PER_TRADE = float(os.getenv("BACKTEST_MAX_RISK_PER_TRADE", "0.0125"))
+MAX_POSITION_BALANCE_PCT = float(os.getenv("BACKTEST_MAX_POSITION_BALANCE_PCT", "0.25"))
+KRAKEN_FEE_RATE = float(os.getenv("BACKTEST_FEE_RATE", "0.0026"))
+ATR_STOP_MULTIPLIER = float(os.getenv("BACKTEST_ATR_STOP_MULTIPLIER", "1.5"))
+ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
+ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "1.5"))
+REQUIRE_MTF_MACD_CONFIRM = os.getenv("BACKTEST_REQUIRE_MTF_MACD_CONFIRM", "false").lower().strip() == "true"
+
+if BACKTEST_PROFILE == "improved":
+    ADX_THRESHOLD = float(os.getenv("BACKTEST_ADX_THRESHOLD", "25.0"))
+    VOLUME_HEALTH_MIN = float(os.getenv("BACKTEST_VOLUME_HEALTH_MIN", "0.75"))
+    MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("BACKTEST_MIN_MINUTES_BETWEEN_TRADES", "360"))
+    MAX_TRADES_PER_DAY = int(os.getenv("BACKTEST_MAX_TRADES_PER_DAY", "1"))
+    ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "3.0"))
+    REQUIRE_MTF_MACD_CONFIRM = os.getenv("BACKTEST_REQUIRE_MTF_MACD_CONFIRM", "true").lower().strip() == "true"
 EMA_SLOW = 100
 MACD_SIGNAL = 10
 MIN_REQUIRED_CANDLES = EMA_SLOW + MACD_SIGNAL
@@ -45,6 +55,7 @@ class Position:
     entry_price: float
     size: float
     stop_loss: float
+    initial_stop_loss: float
     take_profit: float
     entry_fee: float
     highest_price: float
@@ -209,22 +220,36 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
     weights = [0.24, 0.24, 0.12, 0.12, 0.14, 0.14]
     long_confidence = sum(weight for weight, passed in zip(weights, long_checks.values()) if passed)
     short_confidence = sum(weight for weight, passed in zip(weights, short_checks.values()) if passed)
+    mtf_macd_long = daily["macd"]["hist"] > 0 and fourh["macd"]["hist"] > 0
+    mtf_macd_short = daily["macd"]["hist"] < 0 and fourh["macd"]["hist"] < 0
 
-    if weekly_long_context and quality_ok and all(long_checks.values()) and long_confidence >= MIN_CONFIDENCE:
+    if (
+        weekly_long_context
+        and quality_ok
+        and all(long_checks.values())
+        and (mtf_macd_long or not REQUIRE_MTF_MACD_CONFIRM)
+        and long_confidence >= MIN_CONFIDENCE
+    ):
         return {
             "signal": "LONG",
             "confidence": long_confidence,
-            "reason": "Confirmacion obligatoria 1H/4H/1D alcista, 1W como contexto, ADX y volumen OK.",
+            "reason": "Confirmacion 1H/4H/1D alcista, 1W contexto, ADX/volumen OK y MACD MTF confirmado.",
             "price": hourly["price"],
             "atr": hourly["atr"],
             "hourly": hourly,
         }
 
-    if weekly_short_context and quality_ok and all(short_checks.values()) and short_confidence >= MIN_CONFIDENCE:
+    if (
+        weekly_short_context
+        and quality_ok
+        and all(short_checks.values())
+        and (mtf_macd_short or not REQUIRE_MTF_MACD_CONFIRM)
+        and short_confidence >= MIN_CONFIDENCE
+    ):
         return {
             "signal": "SHORT",
             "confidence": short_confidence,
-            "reason": "Confirmacion obligatoria 1H/4H/1D bajista, 1W como contexto, ADX y volumen OK.",
+            "reason": "Confirmacion 1H/4H/1D bajista, 1W contexto, ADX/volumen OK y MACD MTF confirmado.",
             "price": hourly["price"],
             "atr": hourly["atr"],
             "hourly": hourly,
@@ -233,7 +258,7 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
     return {
         "signal": "WAIT",
         "confidence": max(long_confidence, short_confidence),
-        "reason": "Faltan confirmaciones obligatorias de tendencia, ADX, volumen o contexto 1W.",
+        "reason": "Faltan confirmaciones de tendencia, ADX, volumen, contexto 1W o MACD MTF.",
         "price": hourly["price"],
         "atr": hourly["atr"],
         "hourly": hourly,
@@ -298,6 +323,7 @@ class Backtester:
             entry_price=entry_price,
             size=size,
             stop_loss=stop_loss,
+            initial_stop_loss=stop_loss,
             take_profit=take_profit,
             entry_fee=entry_price * size * KRAKEN_FEE_RATE,
             highest_price=entry_price,
@@ -328,12 +354,14 @@ class Backtester:
         low = float(candle["low"])
         if self.position.side == "LONG":
             if low <= self.position.stop_loss:
-                return "STOP_LOSS", self.position.stop_loss
+                reason = "TRAILING_STOP" if self.position.stop_loss > self.position.initial_stop_loss else "STOP_LOSS"
+                return reason, self.position.stop_loss
             if high >= self.position.take_profit:
                 return "TAKE_PROFIT", self.position.take_profit
         else:
             if high >= self.position.stop_loss:
-                return "STOP_LOSS", self.position.stop_loss
+                reason = "TRAILING_STOP" if self.position.stop_loss < self.position.initial_stop_loss else "STOP_LOSS"
+                return reason, self.position.stop_loss
             if low <= self.position.take_profit:
                 return "TAKE_PROFIT", self.position.take_profit
         return None, None
@@ -392,10 +420,11 @@ class Backtester:
     def run(self) -> tuple[pd.DataFrame, pd.DataFrame, float]:
         candles_1h = self.aligned
         for _, candle in candles_1h.iterrows():
-            self.update_trailing_stop(candle)
             exit_reason, exit_price = self.check_price_exit(candle)
             if exit_reason and exit_price is not None:
                 self.close_position(candle, exit_price, exit_reason)
+            if self.position is not None:
+                self.update_trailing_stop(candle)
 
             signal = build_signal_from_aligned(candle)
             allow_immediate_reversal = False
@@ -432,7 +461,17 @@ def main() -> None:
         print("ADVERTENCIA: faltan datos en uno o mas timeframes. El resultado puede ser incompleto.")
     backtester = Backtester(data)
     trades, equity_curve, final_capital = backtester.run()
-    generate_outputs(trades, equity_curve, data["1H"], INITIAL_CAPITAL, final_capital)
+    metadata = {
+        "perfil": BACKTEST_PROFILE,
+        "fee_rate": KRAKEN_FEE_RATE,
+        "adx_threshold": ADX_THRESHOLD,
+        "volume_min": VOLUME_HEALTH_MIN,
+        "max_trades_per_day": MAX_TRADES_PER_DAY,
+        "cooldown_minutes": MIN_MINUTES_BETWEEN_TRADES,
+        "trailing_atr": ATR_TRAILING_MULTIPLIER,
+        "require_mtf_macd": REQUIRE_MTF_MACD_CONFIRM,
+    }
+    generate_outputs(trades, equity_curve, data["1H"], INITIAL_CAPITAL, final_capital, metadata=metadata)
 
 
 if __name__ == "__main__":

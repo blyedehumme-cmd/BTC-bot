@@ -63,7 +63,13 @@ def calculate_summary(trades: pd.DataFrame, equity_curve: pd.DataFrame, initial_
     }
 
 
-def write_report(trades: pd.DataFrame, equity_curve: pd.DataFrame, initial_capital: float, final_capital: float) -> None:
+def write_report(
+    trades: pd.DataFrame,
+    equity_curve: pd.DataFrame,
+    initial_capital: float,
+    final_capital: float,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     summary = calculate_summary(trades, equity_curve, initial_capital, final_capital)
     lines = [
         "REPORTE BACKTEST BTC/USD",
@@ -84,10 +90,11 @@ def write_report(trades: pd.DataFrame, equity_curve: pd.DataFrame, initial_capit
         f"Duracion promedio: {summary['avg_duration']:.2f} horas",
         f"Mejor trade: {money(summary['best_trade'])}",
         f"Peor trade: {money(summary['worst_trade'])}",
-        "",
-        "TRADES",
-        "-" * 72,
     ]
+    if metadata:
+        lines.extend(["", "CONFIGURACION", "-" * 72])
+        lines.extend(f"{key}: {value}" for key, value in metadata.items())
+    lines.extend(["", "TRADES", "-" * 72])
 
     if trades.empty:
         lines.append("No se ejecutaron trades.")
@@ -165,8 +172,15 @@ def plot_drawdown(equity_curve: pd.DataFrame) -> None:
     plt.close()
 
 
-def generate_outputs(trades: pd.DataFrame, equity_curve: pd.DataFrame, candles_1h: pd.DataFrame, initial_capital: float, final_capital: float) -> None:
-    write_report(trades, equity_curve, initial_capital, final_capital)
+def generate_outputs(
+    trades: pd.DataFrame,
+    equity_curve: pd.DataFrame,
+    candles_1h: pd.DataFrame,
+    initial_capital: float,
+    final_capital: float,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    write_report(trades, equity_curve, initial_capital, final_capital, metadata=metadata)
     if not equity_curve.empty:
         plot_equity(equity_curve)
         plot_drawdown(equity_curve)
