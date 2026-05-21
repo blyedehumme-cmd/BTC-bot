@@ -64,7 +64,9 @@ ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "0.25"))
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
-TRAILING_STOP_PCT = float(os.getenv("TRAILING_STOP_PCT", "0.01"))
+ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
+ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
+ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "1.5"))
 
 USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "true").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
@@ -852,54 +854,81 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
 
 
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
-    candidate_checks = [
-        ("LONG", [
-            (weekly["trend"] in ["bull", "neutral"] and weekly["price"] >= weekly["ema100"], 0.18, "1W bullish/neutral"),
-            (daily["trend"] == "bull", 0.20, "1D bullish"),
-            (fourh["trend"] == "bull", 0.20, "4H bullish"),
-            (hourly["trend"] == "bull" and hourly["macd"]["hist"] > 0, 0.18, "1H confirmacion bullish"),
-            (hourly["adx"] >= ADX_THRESHOLD, 0.12, "ADX fuerte"),
-            (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.12, "Volumen saludable"),
-        ]),
-        ("SHORT", [
-            (weekly["trend"] in ["bear", "neutral"] and weekly["price"] <= weekly["ema100"], 0.18, "1W bearish/neutral"),
-            (daily["trend"] == "bear", 0.20, "1D bearish"),
-            (fourh["trend"] == "bear", 0.20, "4H bearish"),
-            (hourly["trend"] == "bear" and hourly["macd"]["hist"] < 0, 0.18, "1H confirmacion bearish"),
-            (hourly["adx"] >= ADX_THRESHOLD, 0.12, "ADX fuerte"),
-            (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.12, "Volumen saludable"),
-        ]),
-    ]
+    atr_value = float(hourly.get("atr", 0.0))
+    candidate_checks = {
+        "LONG": [
+            (daily["trend"] == "bull", 0.24, "1D bullish", "1D no confirma LONG"),
+            (fourh["trend"] == "bull", 0.24, "4H bullish", "4H no confirma LONG"),
+            (hourly["trend"] == "bull", 0.12, "1H bullish", "1H no confirma LONG"),
+            (hourly["macd"]["hist"] > 0, 0.12, "MACD 1H positivo", "MACD 1H no confirma LONG"),
+            (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
+            (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
+        ],
+        "SHORT": [
+            (daily["trend"] == "bear", 0.24, "1D bearish", "1D no confirma SHORT"),
+            (fourh["trend"] == "bear", 0.24, "4H bearish", "4H no confirma SHORT"),
+            (hourly["trend"] == "bear", 0.12, "1H bearish", "1H no confirma SHORT"),
+            (hourly["macd"]["hist"] < 0, 0.12, "MACD 1H negativo", "MACD 1H no confirma SHORT"),
+            (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
+            (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
+        ],
+    }
+    weekly_context = {
+        "LONG": (
+            weekly["trend"] != "bear" and weekly["price"] >= weekly["ema100"],
+            "1W permite LONG como contexto",
+            "Filtro 1W bloquea LONG: tendencia semanal bajista o precio bajo EMA100",
+        ),
+        "SHORT": (
+            weekly["trend"] != "bull" and weekly["price"] <= weekly["ema100"],
+            "1W permite SHORT como contexto",
+            "Filtro 1W bloquea SHORT: tendencia semanal alcista o precio sobre EMA100",
+        ),
+    }
 
-    atr_value = hourly.get("atr", 0.0) or abs(hourly["price"] - hourly["ema21"]) or abs(hourly["price"] - hourly["ema50"])
     candidates: List[Dict[str, Any]] = []
-    for direction, checks in candidate_checks:
+    for direction, checks in candidate_checks.items():
         confidence = 0.0
         reasons: List[str] = []
-        for passed, weight, reason in checks:
+        failures: List[str] = []
+        context_ok, context_reason, context_failure = weekly_context[direction]
+        if context_ok:
+            reasons.append(context_reason)
+        else:
+            failures.append(context_failure)
+        for passed, weight, reason, failure in checks:
             if passed:
                 confidence += weight
                 reasons.append(reason)
-        candidates.append({"direction": direction, "confidence": confidence, "reasons": reasons})
+            else:
+                failures.append(failure)
+        candidates.append({
+            "direction": direction,
+            "confidence": confidence,
+            "reasons": reasons,
+            "failures": failures,
+            "strict_ok": context_ok and not failures and atr_value > 0,
+        })
 
     best_candidate = max(candidates, key=lambda item: float(item["confidence"]))
     best_direction = str(best_candidate["direction"])
     best_confidence = float(best_candidate["confidence"])
-    quality_ok = ai_quality_filter(hourly)
-    near_confidence = best_confidence >= max(0.0, MIN_CONFIDENCE - AI_CONFIDENCE_BUFFER)
+    strict_ok = bool(best_candidate["strict_ok"])
+    near_confidence = strict_ok and best_confidence >= max(0.0, MIN_CONFIDENCE - AI_CONFIDENCE_BUFFER)
 
     if not USE_AI_ASSIST:
         ai_evaluation = _ai_not_called("IA desactivada.", best_confidence)
         ai_reason = "IA desactivada"
-    elif not near_confidence:
+    elif not strict_ok:
+        failure_text = ", ".join(best_candidate["failures"]) if best_candidate["failures"] else "ATR real no disponible"
         ai_evaluation = _ai_not_called(
-            f"OpenAI no llamado: confianza {best_confidence:.2f} debajo de zona cercana a MIN_CONFIDENCE {MIN_CONFIDENCE:.2f}.",
+            f"OpenAI no llamado: swing estricto no confirmado para {best_direction} ({failure_text}).",
             best_confidence,
         )
         ai_reason = f"IA omitida: {'|'.join(ai_evaluation['reasons'])}"
-    elif not quality_ok:
+    elif not near_confidence:
         ai_evaluation = _ai_not_called(
-            f"OpenAI no llamado: filtro basico ADX/volumen no aceptable (ADX={hourly['adx']:.2f}, volumen={hourly['volume_ratio']:.2f}).",
+            f"OpenAI no llamado: confianza {best_confidence:.2f} debajo de zona cercana a MIN_CONFIDENCE {MIN_CONFIDENCE:.2f}.",
             best_confidence,
         )
         ai_reason = f"IA omitida: {'|'.join(ai_evaluation['reasons'])}"
@@ -916,20 +945,28 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         "ai_feedback": ai_evaluation.get("openai", {}),
     }
 
+    if atr_value <= 0:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"ATR real no disponible para SL/TP en {best_direction}. {ai_reason}",
+        }
+
+    if not strict_ok:
+        return {
+            **base,
+            "signal": "WAIT",
+            "confidence": best_confidence,
+            "reason": f"No se cumplen condiciones swing estrictas para {best_direction}: {', '.join(best_candidate['failures'])}. {ai_reason}",
+        }
+
     if best_confidence < MIN_CONFIDENCE:
         return {
             **base,
             "signal": "WAIT",
             "confidence": best_confidence,
-            "reason": f"No se cumplen condiciones multi-timeframe para {best_direction}. {ai_reason}",
-        }
-
-    if not quality_ok:
-        return {
-            **base,
-            "signal": "WAIT",
-            "confidence": best_confidence,
-            "reason": f"Falta calidad ADX/volumen para {best_direction}. {ai_reason}",
+            "reason": f"Confianza insuficiente para {best_direction}. {ai_reason}",
         }
 
     if USE_AI_ASSIST and ai_evaluation.get("called_openai") and not ai_evaluation["allow"]:
@@ -966,8 +1003,12 @@ def analyze_market() -> Dict[str, Any]:
         "1H": get_timeframe_candles("1H", CANDLE_LIMITS["1H"]),
     }
     last_price = float(candles["1H"][-1]["close"]) if candles["1H"] else 0.0
-    if any(len(items) < 60 for items in candles.values()):
-        return empty_analysis("No hay suficientes velas en todas las temporalidades.", last_price)
+    min_required_candles = EMA_SLOW + MACD_SIGNAL
+    if any(len(items) < min_required_candles for items in candles.values()):
+        return empty_analysis(
+            f"No hay suficientes velas para EMA100/MACD. Minimo requerido: {min_required_candles}.",
+            last_price,
+        )
 
     weekly = timeframe_analysis(candles["1W"], "1W")
     daily = timeframe_analysis(candles["1D"], "1D")
@@ -986,8 +1027,8 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     hourly = analysis.get("hourly", {})
     price = float(hourly.get("price", analysis.get("price", 0.0)))
     atr_value = float(analysis.get("atr", 0.0))
-    support = max(0.0, price - atr_value * 1.5) if atr_value > 0 else price * 0.995
-    resistance = price + atr_value * 1.5 if atr_value > 0 else price * 1.005
+    support = max(0.0, price - atr_value * ATR_STOP_MULTIPLIER) if atr_value > 0 else price * 0.995
+    resistance = price + atr_value * ATR_STOP_MULTIPLIER if atr_value > 0 else price * 1.005
     return {
         "symbol": selected_symbol(),
         "timeframe": "1H",
@@ -1138,7 +1179,7 @@ def calculate_position_size(balance: float, price: float, atr_val: float) -> flo
     if atr_val <= 0 or price <= 0 or balance <= 0:
         return 0.0
     risk_amount = balance * MAX_RISK_PER_TRADE
-    stop_distance = atr_val * 1.5
+    stop_distance = atr_val * ATR_STOP_MULTIPLIER
     btc_size = risk_amount / stop_distance
     usd_size = min(btc_size * price, balance * MAX_POSITION_BALANCE_PCT)
     if usd_size < MIN_ORDER_USD:
@@ -1173,22 +1214,23 @@ def record_trade_pnl(exit_price: float) -> float:
 def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
     if price <= 0:
         return None
+    atr_value = float(hourly.get("atr", 0.0))
     if state.side == "LONG":
         state.highest_price = max(state.highest_price, price)
         if price <= state.stop_loss:
             return "STOP_LOSS"
         if price >= state.take_profit:
             return "TAKE_PROFIT"
-        if hourly.get("adx", 0.0) >= ADX_THRESHOLD:
-            state.stop_loss = max(state.stop_loss, state.highest_price * (1.0 - TRAILING_STOP_PCT))
+        if hourly.get("adx", 0.0) >= ADX_THRESHOLD and atr_value > 0:
+            state.stop_loss = max(state.stop_loss, state.highest_price - (atr_value * ATR_TRAILING_MULTIPLIER))
     elif state.side == "SHORT":
         state.lowest_price = min(state.lowest_price if state.lowest_price > 0 else price, price)
         if price >= state.stop_loss:
             return "STOP_LOSS"
         if price <= state.take_profit:
             return "TAKE_PROFIT"
-        if hourly.get("adx", 0.0) >= ADX_THRESHOLD:
-            state.stop_loss = min(state.stop_loss, state.lowest_price * (1.0 + TRAILING_STOP_PCT))
+        if hourly.get("adx", 0.0) >= ADX_THRESHOLD and atr_value > 0:
+            state.stop_loss = min(state.stop_loss, state.lowest_price + (atr_value * ATR_TRAILING_MULTIPLIER))
     return None
 
 
@@ -1270,7 +1312,9 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"
         f"Max trades por dia: {MAX_TRADES_PER_DAY}\n"
-        f"Trailing stop: {TRAILING_STOP_PCT * 100:.2f}%"
+        f"SL ATR: {ATR_STOP_MULTIPLIER:.2f}x\n"
+        f"TP ATR: {ATR_TAKE_PROFIT_MULTIPLIER:.2f}x\n"
+        f"Trailing ATR: {ATR_TRAILING_MULTIPLIER:.2f}x"
     )
 
 
@@ -1373,12 +1417,12 @@ async def trading_loop(app: Optional[Application]) -> None:
                     usd_size = btc_size * price
                     if usd_size >= MIN_ORDER_USD:
                         if state.last_signal == "LONG":
-                            stop = price - atr_used * 1.5
-                            take = price + atr_used * 3.0
+                            stop = price - atr_used * ATR_STOP_MULTIPLIER
+                            take = price + atr_used * ATR_TAKE_PROFIT_MULTIPLIER
                             order_side = "BUY"
                         else:
-                            stop = price + atr_used * 1.5
-                            take = price - atr_used * 3.0
+                            stop = price + atr_used * ATR_STOP_MULTIPLIER
+                            take = price - atr_used * ATR_TAKE_PROFIT_MULTIPLIER
                             order_side = "SELL"
 
                         place_market_order(
