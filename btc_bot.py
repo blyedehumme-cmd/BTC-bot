@@ -100,6 +100,9 @@ VOLUME_HEALTH_MIN = float(os.getenv("VOLUME_HEALTH_MIN", "0.60"))
 REQUIRE_MTF_MACD_CONFIRM = os.getenv("REQUIRE_MTF_MACD_CONFIRM", "true").lower().strip() == "true"
 AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
 MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
+MAX_ENTRY_EMA21_ATR_DISTANCE = float(os.getenv("MAX_ENTRY_EMA21_ATR_DISTANCE", "2.5"))
+SAME_SIDE_WIN_STREAK_LIMIT = int(os.getenv("SAME_SIDE_WIN_STREAK_LIMIT", "3"))
+WIN_STREAK_PULLBACK_ATR_DISTANCE = float(os.getenv("WIN_STREAK_PULLBACK_ATR_DISTANCE", "1.0"))
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -1052,6 +1055,7 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
             (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
+            *entry_extension_checks("LONG", hourly),
         ],
         "SHORT": [
             (ALLOW_SHORT_SIGNALS, 0.00, "SHORT habilitado", "Senales SHORT deshabilitadas por configuracion"),
@@ -1068,6 +1072,7 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             (hourly["adx"] >= ADX_THRESHOLD, 0.14, "ADX fuerte", "ADX insuficiente"),
             (hourly["volume_ratio"] >= VOLUME_HEALTH_MIN, 0.14, "Volumen saludable", "Volumen insuficiente"),
             (volatility_ok, 0.00, "Volatilidad 1H aceptable", "Volatilidad extrema: vela 1H demasiado grande contra ATR"),
+            *entry_extension_checks("SHORT", hourly),
         ],
     }
     weekly_context = {
@@ -1229,6 +1234,50 @@ def _direction_matches(direction: str, analysis: Dict[str, Any]) -> bool:
     if direction == "SHORT":
         return analysis.get("trend") == "bear" and analysis.get("macd", {}).get("hist", 0.0) < 0
     return False
+
+
+def consecutive_same_side_wins(direction: str) -> int:
+    streak = 0
+    for trade in reversed(state.trade_history):
+        if trade.get("side") != direction:
+            break
+        if float(trade.get("pnl", 0.0)) <= 0:
+            break
+        streak += 1
+    return streak
+
+
+def entry_extension_checks(direction: str, analysis: Dict[str, Any]) -> List[tuple[bool, float, str, str]]:
+    price = float(analysis.get("price", 0.0))
+    ema21_value = float(analysis.get("ema21", 0.0))
+    atr_value = float(analysis.get("atr", 0.0))
+    if price <= 0 or ema21_value <= 0 or atr_value <= 0:
+        return [(False, 0.0, "Distancia EMA21 disponible", "No hay datos suficientes para medir extension contra EMA21")]
+
+    distance_atr = abs(price - ema21_value) / atr_value
+    if direction == "LONG":
+        overextended = price > ema21_value and distance_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        streak_pullback_ok = price <= ema21_value + atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE
+    else:
+        overextended = price < ema21_value and distance_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        streak_pullback_ok = price >= ema21_value - atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE
+
+    streak = consecutive_same_side_wins(direction)
+    needs_pullback = SAME_SIDE_WIN_STREAK_LIMIT > 0 and streak >= SAME_SIDE_WIN_STREAK_LIMIT
+    return [
+        (
+            not overextended,
+            0.0,
+            f"Entrada no extendida contra EMA21 ({distance_atr:.2f} ATR)",
+            f"Entrada bloqueada: precio extendido {distance_atr:.2f} ATR desde EMA21",
+        ),
+        (
+            not needs_pullback or streak_pullback_ok,
+            0.0,
+            f"Racha {direction} controlada ({streak} wins)",
+            f"Racha {direction} de {streak} wins: esperar pullback cerca de EMA21 antes de otra entrada",
+        ),
+    ]
 
 
 def build_entry_timeframe_signal(
@@ -1673,6 +1722,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"ADX threshold: {ADX_THRESHOLD:.2f}\n"
         f"Volumen minimo: {VOLUME_HEALTH_MIN:.2f}x\n"
         f"MACD MTF obligatorio: {REQUIRE_MTF_MACD_CONFIRM}\n"
+        f"Max extension EMA21: {MAX_ENTRY_EMA21_ATR_DISTANCE:.2f} ATR\n"
+        f"Racha wins mismo lado: {SAME_SIDE_WIN_STREAK_LIMIT}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"

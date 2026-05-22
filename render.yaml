@@ -68,6 +68,12 @@ services:
         value: "3.0"
       - key: REQUIRE_MTF_MACD_CONFIRM
         value: "true"
+      - key: MAX_ENTRY_EMA21_ATR_DISTANCE
+        value: "2.5"
+      - key: SAME_SIDE_WIN_STREAK_LIMIT
+        value: "3"
+      - key: WIN_STREAK_PULLBACK_ATR_DISTANCE
+        value: "1.0"
       - key: KRAKEN_PAIR
         value: XBTUSD
       - key: KRAKEN_FUTURES_SYMBOL

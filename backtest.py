@@ -39,6 +39,9 @@ ATR_STOP_MULTIPLIER = float(os.getenv("BACKTEST_ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
 ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "1.5"))
 REQUIRE_MTF_MACD_CONFIRM = os.getenv("BACKTEST_REQUIRE_MTF_MACD_CONFIRM", "false").lower().strip() == "true"
+MAX_ENTRY_EMA21_ATR_DISTANCE = float(os.getenv("BACKTEST_MAX_ENTRY_EMA21_ATR_DISTANCE", "2.5"))
+SAME_SIDE_WIN_STREAK_LIMIT = int(os.getenv("BACKTEST_SAME_SIDE_WIN_STREAK_LIMIT", "3"))
+WIN_STREAK_PULLBACK_ATR_DISTANCE = float(os.getenv("BACKTEST_WIN_STREAK_PULLBACK_ATR_DISTANCE", "1.0"))
 
 if BACKTEST_PROFILE == "improved":
     ADX_THRESHOLD = float(os.getenv("BACKTEST_ADX_THRESHOLD", "25.0"))
@@ -204,6 +207,12 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
     weekly_short_context = weekly["trend"] != "bull" and weekly["price"] <= weekly["ema100"]
 
     quality_ok = hourly["adx"] >= ADX_THRESHOLD and hourly["volume_ratio"] >= VOLUME_HEALTH_MIN and hourly["atr"] > 0
+    atr_value = float(hourly.get("atr", 0.0))
+    price = float(hourly.get("price", 0.0))
+    ema21_value = float(hourly.get("ema21", 0.0))
+    distance_atr = abs(price - ema21_value) / atr_value if atr_value > 0 else 999.0
+    long_not_extended = price <= ema21_value or distance_atr <= MAX_ENTRY_EMA21_ATR_DISTANCE
+    short_not_extended = price >= ema21_value or distance_atr <= MAX_ENTRY_EMA21_ATR_DISTANCE
 
     long_checks = {
         "1D bullish": daily["trend"] == "bull",
@@ -212,6 +221,7 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
         "MACD 1H positivo": hourly["macd"]["hist"] > 0,
         "ADX fuerte": hourly["adx"] >= ADX_THRESHOLD,
         "Volumen saludable": hourly["volume_ratio"] >= VOLUME_HEALTH_MIN,
+        "No extendido EMA21": long_not_extended,
     }
     short_checks = {
         "1D bearish": daily["trend"] == "bear",
@@ -220,8 +230,9 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
         "MACD 1H negativo": hourly["macd"]["hist"] < 0,
         "ADX fuerte": hourly["adx"] >= ADX_THRESHOLD,
         "Volumen saludable": hourly["volume_ratio"] >= VOLUME_HEALTH_MIN,
+        "No extendido EMA21": short_not_extended,
     }
-    weights = [0.24, 0.24, 0.12, 0.12, 0.14, 0.14]
+    weights = [0.24, 0.24, 0.12, 0.12, 0.14, 0.14, 0.0]
     long_confidence = sum(weight for weight, passed in zip(weights, long_checks.values()) if passed)
     short_confidence = sum(weight for weight, passed in zip(weights, short_checks.values()) if passed)
     mtf_macd_long = daily["macd"]["hist"] > 0 and fourh["macd"]["hist"] > 0
@@ -320,6 +331,12 @@ class Backtester:
         entry_price = float(candle["close"])
         atr_value = float(signal["atr"])
         adx_value = float(candle["adx"])
+        if self.same_side_win_streak(side) >= SAME_SIDE_WIN_STREAK_LIMIT:
+            ema21_value = float(candle["ema21"])
+            if side == "LONG" and entry_price > ema21_value + atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE:
+                return
+            if side == "SHORT" and entry_price < ema21_value - atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE:
+                return
         size = calculate_position_size(self.balance, entry_price, atr_value, adx_value)
         if size <= 0:
             return
@@ -409,6 +426,14 @@ class Backtester:
         self.position = None
         self.last_trade_time = exit_time
 
+    def same_side_win_streak(self, side: str) -> int:
+        streak = 0
+        for trade in reversed(self.trades):
+            if trade["side"] != side or trade["pnl_net"] <= 0:
+                break
+            streak += 1
+        return streak
+
     def current_equity(self, close_price: float) -> float:
         if self.position is None:
             return self.balance
@@ -484,6 +509,9 @@ def main() -> None:
         "cooldown_minutes": MIN_MINUTES_BETWEEN_TRADES,
         "trailing_atr": ATR_TRAILING_MULTIPLIER,
         "require_mtf_macd": REQUIRE_MTF_MACD_CONFIRM,
+        "max_entry_ema21_atr_distance": MAX_ENTRY_EMA21_ATR_DISTANCE,
+        "same_side_win_streak_limit": SAME_SIDE_WIN_STREAK_LIMIT,
+        "win_streak_pullback_atr_distance": WIN_STREAK_PULLBACK_ATR_DISTANCE,
         "dynamic_leverage": DYNAMIC_LEVERAGE_ENABLED,
         "leverage_mid": DYNAMIC_LEVERAGE_MID,
         "leverage_max": DYNAMIC_LEVERAGE_MAX,
