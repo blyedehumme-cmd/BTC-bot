@@ -73,7 +73,7 @@ MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "240"))
 MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
 ANALYZE_EVERY_SECONDS = int(os.getenv("ANALYZE_EVERY_SECONDS", "300"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("MAX_POSITION_BALANCE_PCT", "1.0"))
-MAX_OPEN_POSITIONS = 4
+MAX_OPEN_POSITIONS = 1
 MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
@@ -106,6 +106,7 @@ API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
 API_RETRY_MAX_DELAY = float(os.getenv("API_RETRY_MAX_DELAY", "30.0"))
 
 TIMEFRAMES = {
+    "30M": "THIRTY_MINUTE",
     "1H": "ONE_HOUR",
     "4H": "FOUR_HOUR",
     "1D": "ONE_DAY",
@@ -113,6 +114,7 @@ TIMEFRAMES = {
 }
 
 KRAKEN_INTERVALS = {
+    "30M": 30,
     "1H": 60,
     "4H": 240,
     "1D": 1440,
@@ -120,6 +122,7 @@ KRAKEN_INTERVALS = {
 }
 
 CANDLE_SECONDS = {
+    "30M": 1800,
     "1H": 3600,
     "4H": 14400,
     "1D": 86400,
@@ -127,6 +130,7 @@ CANDLE_SECONDS = {
 }
 
 CANDLE_LIMITS = {
+    "30M": 180,
     "1H": 160,
     "4H": 120,
     "1D": 140,
@@ -177,6 +181,7 @@ class BotState:
     position_open: bool = False
     side: Optional[str] = None
     position_symbol: str = "BTC"
+    entry_timeframe: str = "1H"
     entry_price: float = 0.0
     position_size_btc: float = 0.0
     position_usd: float = 0.0
@@ -235,6 +240,7 @@ def load_state() -> None:
             position_open=bool(data.get("position_open", False)),
             side=data.get("side"),
             position_symbol=str(data.get("position_symbol", "BTC")).upper(),
+            entry_timeframe=str(data.get("entry_timeframe", "1H")).upper(),
             entry_price=float(data.get("entry_price", 0.0)),
             position_size_btc=float(data.get("position_size_btc", 0.0)),
             position_usd=float(data.get("position_usd", 0.0)),
@@ -272,6 +278,7 @@ def load_state() -> None:
 def position_from_state() -> Dict[str, Any]:
     return {
         "symbol": state.position_symbol,
+        "entry_timeframe": state.entry_timeframe,
         "side": state.side,
         "entry_price": state.entry_price,
         "position_size_btc": state.position_size_btc,
@@ -290,6 +297,7 @@ def position_from_state() -> Dict[str, Any]:
 def set_state_from_position(position: Dict[str, Any]) -> None:
     state.position_open = True
     state.position_symbol = str(position.get("symbol", WATCHLIST[0])).upper()
+    state.entry_timeframe = str(position.get("entry_timeframe", "1H")).upper()
     state.side = position.get("side")
     state.entry_price = float(position.get("entry_price", 0.0))
     state.position_size_btc = float(position.get("position_size_btc", 0.0))
@@ -310,11 +318,12 @@ def sync_position_from_state(position: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def active_positions() -> List[Dict[str, Any]]:
-    state.positions = [
+    valid_positions = [
         pos
         for pos in state.positions
         if pos.get("side") in ["LONG", "SHORT"] and str(pos.get("symbol", "")).upper() in WATCHLIST
     ]
+    state.positions = valid_positions[:MAX_OPEN_POSITIONS]
     return state.positions
 
 
@@ -327,6 +336,7 @@ def sync_primary_position() -> None:
     state.position_open = False
     state.side = None
     state.position_symbol = WATCHLIST[0]
+    state.entry_timeframe = "1H"
     state.entry_price = 0.0
     state.position_size_btc = 0.0
     state.position_usd = 0.0
@@ -339,6 +349,16 @@ def sync_primary_position() -> None:
 
 def open_position_symbols() -> set[str]:
     return {str(position.get("symbol", "")).upper() for position in active_positions()}
+
+
+def analysis_key_for_timeframe(timeframe: str) -> str:
+    return {
+        "30M": "thirtym",
+        "1H": "hourly",
+        "4H": "fourh",
+        "1D": "daily",
+        "1W": "weekly",
+    }.get(timeframe.upper(), "hourly")
 
 
 # =========================
@@ -477,7 +497,7 @@ async def sync_bot_control_from_backend() -> None:
 
 
 def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
-    step = {"1H": 80.0, "4H": 180.0, "1D": 320.0, "1W": 600.0}[timeframe]
+    step = {"30M": 50.0, "1H": 80.0, "4H": 180.0, "1D": 320.0, "1W": 600.0}[timeframe]
     current_price = 30000.0
     now = int(time.time())
     result: List[Dict[str, Any]] = []
@@ -1195,6 +1215,68 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
     }
 
 
+ENTRY_TIMEFRAME_PRIORITY = {
+    "30M": 0.00,
+    "1H": 0.01,
+    "4H": 0.02,
+    "1D": 0.03,
+}
+
+
+def _direction_matches(direction: str, analysis: Dict[str, Any]) -> bool:
+    if direction == "LONG":
+        return analysis.get("trend") == "bull" and analysis.get("macd", {}).get("hist", 0.0) > 0
+    if direction == "SHORT":
+        return analysis.get("trend") == "bear" and analysis.get("macd", {}).get("hist", 0.0) < 0
+    return False
+
+
+def build_entry_timeframe_signal(
+    entry_timeframe: str,
+    weekly: Dict[str, Any],
+    daily: Dict[str, Any],
+    fourh: Dict[str, Any],
+    hourly: Dict[str, Any],
+    thirtym: Dict[str, Any],
+) -> Dict[str, Any]:
+    entry_map = {
+        "30M": thirtym,
+        "1H": hourly,
+        "4H": fourh,
+        "1D": daily,
+    }
+    entry = entry_map[entry_timeframe]
+    if entry_timeframe == "30M":
+        signal = build_signal(weekly, daily, fourh, thirtym)
+        direction = str(signal.get("signal", "WAIT"))
+        if direction in ["LONG", "SHORT"] and not _direction_matches(direction, hourly):
+            signal = {
+                **signal,
+                "signal": "WAIT",
+                "reason": f"30M dio {direction}, pero 1H no confirma la misma direccion.",
+            }
+    elif entry_timeframe == "1H":
+        signal = build_signal(weekly, daily, fourh, hourly)
+    elif entry_timeframe == "4H":
+        signal = build_signal(weekly, daily, daily, fourh)
+    else:
+        signal = build_signal(weekly, daily, daily, daily)
+
+    adx_component = min(float(entry.get("adx", 0.0)) / 100.0, 0.10)
+    volume_component = min(float(entry.get("volume_ratio", 0.0)) / 100.0, 0.03)
+    opportunity_score = float(signal.get("confidence", 0.0)) + adx_component + volume_component + ENTRY_TIMEFRAME_PRIORITY[entry_timeframe]
+    signal.update({
+        "entry_timeframe": entry_timeframe,
+        "entry_analysis": entry,
+        "price": entry.get("price", signal.get("price", 0.0)),
+        "atr": entry.get("atr", signal.get("atr", 0.0)),
+        "opportunity_score": opportunity_score,
+    })
+    if signal.get("signal") in ["LONG", "SHORT"]:
+        signal["reason"] = f"Entrada {entry_timeframe}: {signal.get('reason', '')}"
+    return signal
+
+
 def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
     selected = (symbol or WATCHLIST[0]).upper()
     candles = {
@@ -1202,6 +1284,7 @@ def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
         "1D": get_timeframe_candles("1D", CANDLE_LIMITS["1D"], selected),
         "4H": get_timeframe_candles("4H", CANDLE_LIMITS["4H"], selected),
         "1H": get_timeframe_candles("1H", CANDLE_LIMITS["1H"], selected),
+        "30M": get_timeframe_candles("30M", CANDLE_LIMITS["30M"], selected),
     }
     last_price = float(candles["1H"][-1]["close"]) if candles["1H"] else 0.0
     min_required_candles = EMA_SLOW + MACD_SIGNAL
@@ -1215,7 +1298,16 @@ def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
     daily = timeframe_analysis(candles["1D"], "1D")
     fourh = timeframe_analysis(candles["4H"], "4H")
     hourly = timeframe_analysis(candles["1H"], "1H")
-    signal = build_signal(weekly, daily, fourh, hourly)
+    thirtym = timeframe_analysis(candles["30M"], "30M")
+    entry_signals = [
+        build_entry_timeframe_signal(entry_timeframe, weekly, daily, fourh, hourly, thirtym)
+        for entry_timeframe in ["30M", "1H", "4H", "1D"]
+    ]
+    actionable = [item for item in entry_signals if item.get("signal") in ["LONG", "SHORT"]]
+    signal = max(
+        actionable if actionable else entry_signals,
+        key=lambda item: float(item.get("opportunity_score", item.get("confidence", 0.0))),
+    )
     signal.update({
         "symbol": selected,
         "trade_symbol": selected_symbol(selected),
@@ -1224,6 +1316,8 @@ def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
         "daily": daily,
         "fourh": fourh,
         "hourly": hourly,
+        "thirtym": thirtym,
+        "entry_signals": entry_signals,
     })
     return signal
 
@@ -1244,7 +1338,7 @@ def analyze_watchlist() -> List[Dict[str, Any]]:
 def choose_trade_analysis(analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
     actionable = [item for item in analyses if item.get("signal") in ["LONG", "SHORT"]]
     candidates = actionable if actionable else analyses
-    return max(candidates, key=lambda item: float(item.get("confidence", 0.0))) if candidates else empty_analysis("Watchlist vacio.", 0.0)
+    return max(candidates, key=lambda item: float(item.get("opportunity_score", item.get("confidence", 0.0)))) if candidates else empty_analysis("Watchlist vacio.", 0.0)
 
 
 # =========================
@@ -1252,19 +1346,19 @@ def choose_trade_analysis(analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
 # =========================
 
 def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
-    hourly = analysis.get("hourly", {})
-    price = float(hourly.get("price", analysis.get("price", 0.0)))
+    display_analysis = analysis.get("entry_analysis") or analysis.get("hourly", {})
+    price = float(display_analysis.get("price", analysis.get("price", 0.0)))
     atr_value = float(analysis.get("atr", 0.0))
     support = max(0.0, price - atr_value * ATR_STOP_MULTIPLIER) if atr_value > 0 else price * 0.995
     resistance = price + atr_value * ATR_STOP_MULTIPLIER if atr_value > 0 else price * 1.005
     return {
         "symbol": analysis.get("trade_symbol", selected_symbol(str(analysis.get("symbol", WATCHLIST[0])))),
-        "timeframe": "1H",
+        "timeframe": analysis.get("entry_timeframe", "1H"),
         "price": price,
-        "trend": hourly.get("trend", "neutral"),
+        "trend": display_analysis.get("trend", "neutral"),
         "support": support,
         "resistance": resistance,
-        "volume": float(hourly.get("volume_ratio", 0.0)),
+        "volume": float(display_analysis.get("volume_ratio", 0.0)),
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -1274,11 +1368,11 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     direction = analysis.get("signal", "WAIT")
     return {
         "symbol": analysis.get("trade_symbol", selected_symbol(str(analysis.get("symbol", WATCHLIST[0])))),
-        "timeframe": "1H",
+        "timeframe": analysis.get("entry_timeframe", "1H"),
         "direction": direction,
         "confidence_score": max(0, min(confidence, 100)),
         "risk_level": "low" if confidence >= 80 else "medium" if confidence >= 50 else "high",
-        "market_condition": analysis.get("hourly", {}).get("trend", "neutral"),
+        "market_condition": (analysis.get("entry_analysis") or analysis.get("hourly", {})).get("trend", "neutral"),
         "approved": direction in ["LONG", "SHORT"],
         "explanation": analysis.get("reason", "No reason provided."),
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -1297,8 +1391,14 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
         "trade_symbol": analysis.get("trade_symbol"),
         "asset_name": analysis.get("asset_name"),
         "signal": direction,
+        "entry_timeframe": analysis.get("entry_timeframe", "1H"),
+        "opportunity_score": analysis.get("opportunity_score"),
         "confidence": analysis.get("confidence", 0.0),
+        "trend_30m": analysis.get("thirtym", {}).get("trend"),
         "trend_1h": hourly.get("trend"),
+        "trend_4h": analysis.get("fourh", {}).get("trend"),
+        "trend_1d": analysis.get("daily", {}).get("trend"),
+        "entry_adx": (analysis.get("entry_analysis") or {}).get("adx"),
         "adx": hourly.get("adx"),
         "volume_ratio": hourly.get("volume_ratio"),
         "atr": hourly.get("atr"),
@@ -1487,6 +1587,7 @@ def close_position_state() -> None:
         return
     state.side = None
     state.position_symbol = WATCHLIST[0]
+    state.entry_timeframe = "1H"
     state.entry_price = 0.0
     state.position_size_btc = 0.0
     state.position_usd = 0.0
@@ -1541,6 +1642,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Producto: {selected_symbol(state.position_symbol)}\n"
         f"Posiciones abiertas: {len(active_positions())}/{MAX_OPEN_POSITIONS}\n"
         f"Simbolo posicion: {state.position_symbol}\n"
+        f"Temporalidad entrada: {state.entry_timeframe}\n"
         f"Side: {state.side}\n"
         f"Entrada: {state.entry_price:.2f}\n"
         f"BTC: {state.position_size_btc:.8f}\n"
@@ -1558,6 +1660,7 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Exchange: {EXCHANGE}\n"
         f"Modo exchange: {EXCHANGE_MODE}\n"
         f"Watchlist: {', '.join(WATCHLIST)}\n"
+        f"Temporalidades entrada: 30M, 1H, 4H, 1D\n"
         f"Producto: {selected_symbol(state.position_symbol)}\n"
         f"Apalancamiento max: {MAX_LEVERAGE:.2f}x\n"
         f"Apalancamiento dinamico: {DYNAMIC_LEVERAGE_ENABLED}\n"
@@ -1611,15 +1714,17 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
         set_state_from_position(position)
         analysis = analyze_market(state.position_symbol)
         analyses.append(analysis)
-        price = float(analysis.get("price", 0.0))
-        exit_reason = manage_open_position(price, analysis.get("hourly", {}))
+        entry_timeframe = str(position.get("entry_timeframe", "1H")).upper()
+        timeframe_analysis_data = analysis.get(analysis_key_for_timeframe(entry_timeframe)) or analysis.get("entry_analysis") or analysis.get("hourly", {})
+        price = float(timeframe_analysis_data.get("price", analysis.get("price", 0.0)))
+        exit_reason = manage_open_position(price, timeframe_analysis_data)
         if exit_reason:
             order_side = "SELL" if state.side == "LONG" else "BUY"
             place_market_order(
                 order_side,
                 base_size=state.position_size_btc if state.side == "LONG" else None,
                 quote_size=None if state.side == "LONG" else state.position_usd,
-                leverage=float(position.get("leverage", effective_leverage(analysis.get("hourly", {}).get("adx", 0.0)))),
+                leverage=float(position.get("leverage", effective_leverage(timeframe_analysis_data.get("adx", 0.0)))),
             )
             pnl = record_trade_pnl(price)
             await send_trade_to_backend(price, pnl)
@@ -1662,8 +1767,10 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         return False
 
     price = float(analysis.get("price", 0.0))
-    atr_used = float(analysis.get("atr", 0.0)) or float(analysis.get("hourly", {}).get("atr", 0.0))
-    adx_used = float(analysis.get("hourly", {}).get("adx", 0.0))
+    entry_timeframe = str(analysis.get("entry_timeframe", "1H")).upper()
+    entry_analysis = analysis.get("entry_analysis") or analysis.get("hourly", {})
+    atr_used = float(analysis.get("atr", 0.0)) or float(entry_analysis.get("atr", 0.0))
+    adx_used = float(entry_analysis.get("adx", 0.0))
     leverage_used = effective_leverage(adx_used)
     size = calculate_position_size(balance, price, atr_used, adx_used)
     usd_size = size * price
@@ -1686,6 +1793,7 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
     opened_at = time.time()
     position = {
         "symbol": symbol,
+        "entry_timeframe": entry_timeframe,
         "side": side,
         "entry_price": price,
         "position_size_btc": size,
@@ -1706,8 +1814,9 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
     set_state_from_position(position)
     save_state()
     logger.info(
-        "position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f leverage=%.2fx adx=%.2f stop=%.2f take=%.2f open_positions=%s",
+        "position_opened symbol=%s timeframe=%s side=%s price=%.2f usd=%.2f size=%.8f leverage=%.2fx adx=%.2f stop=%.2f take=%.2f open_positions=%s",
         symbol,
+        entry_timeframe,
         side,
         price,
         usd_size,
@@ -1721,8 +1830,9 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
     await send_telegram(
         app,
         f"{symbol} {'Compra' if side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
+        f"Temporalidad: {entry_timeframe}\n"
         f"Precio: {price:.2f}\nUSD: {usd_size:.2f}\nSize: {size:.8f}\n"
-        f"Apalancamiento: {leverage_used:.2f}x\nADX 1H: {adx_used:.2f}\n"
+        f"Apalancamiento: {leverage_used:.2f}x\nADX {entry_timeframe}: {adx_used:.2f}\n"
         f"Stop: {stop:.2f}\nTake Profit: {take:.2f}\nATR usado: {atr_used:.2f}\n"
         f"Confianza: {float(analysis.get('confidence', 0.0)):.2f}\nRazon: {analysis.get('reason', '')}",
     )
