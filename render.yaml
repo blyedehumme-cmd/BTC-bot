@@ -44,6 +44,12 @@ services:
         value: futures
       - key: MAX_LEVERAGE
         value: "3"
+      - key: DYNAMIC_LEVERAGE_ENABLED
+        value: "true"
+      - key: DYNAMIC_LEVERAGE_STRONG_ADX
+        value: "30"
+      - key: DYNAMIC_LEVERAGE_MID
+        value: "2"
       - key: WATCHLIST
         value: BTC
       - key: MAX_TRADES_PER_DAY
@@ -51,7 +57,7 @@ services:
       - key: MIN_MINUTES_BETWEEN_TRADES
         value: "240"
       - key: MAX_RISK_PER_TRADE
-        value: "0.05"
+        value: "0.03"
       - key: MAX_POSITION_BALANCE_PCT
         value: "1.0"
       - key: ADX_THRESHOLD

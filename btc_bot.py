@@ -62,8 +62,11 @@ ALLOW_SHORT_SIGNALS = os.getenv("ALLOW_SHORT_SIGNALS", "true").lower().strip() =
 USE_CLOSED_CANDLES = os.getenv("USE_CLOSED_CANDLES", "true").lower().strip() == "true"
 MAX_ALLOWED_LEVERAGE = 3.0
 MAX_LEVERAGE = max(1.0, min(float(os.getenv("MAX_LEVERAGE", "3.0")), MAX_ALLOWED_LEVERAGE))
+DYNAMIC_LEVERAGE_ENABLED = os.getenv("DYNAMIC_LEVERAGE_ENABLED", "true").lower().strip() == "true"
+DYNAMIC_LEVERAGE_STRONG_ADX = float(os.getenv("DYNAMIC_LEVERAGE_STRONG_ADX", "30.0"))
+DYNAMIC_LEVERAGE_MID = max(1.0, min(float(os.getenv("DYNAMIC_LEVERAGE_MID", "2.0")), MAX_ALLOWED_LEVERAGE))
 
-MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.05"))
+MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "0.03"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.70"))
 MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("MIN_MINUTES_BETWEEN_TRADES", "240"))
@@ -599,13 +602,24 @@ def get_usdc_balance() -> float:
     return 0.0
 
 
-def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None) -> Dict[str, Any]:
+def effective_leverage(adx_value: float = 0.0) -> float:
+    if EXCHANGE != "kraken" or EXCHANGE_MODE != "futures":
+        return 1.0
+    if not DYNAMIC_LEVERAGE_ENABLED:
+        return MAX_LEVERAGE
+    if adx_value >= DYNAMIC_LEVERAGE_STRONG_ADX:
+        return MAX_LEVERAGE
+    return min(DYNAMIC_LEVERAGE_MID, MAX_LEVERAGE)
+
+
+def place_market_order(side: str, quote_size: Optional[float] = None, base_size: Optional[float] = None, leverage: Optional[float] = None) -> Dict[str, Any]:
+    order_leverage = leverage if leverage is not None else effective_leverage()
     if DRY_RUN:
         logger.info(
             "paper_order venue=%s symbol=%s leverage=%.2fx side=%s quote_size=%s base_size=%s",
             trading_venue_label(),
             selected_symbol(state.position_symbol),
-            MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+            order_leverage,
             side,
             quote_size,
             base_size,
@@ -614,7 +628,7 @@ def place_market_order(side: str, quote_size: Optional[float] = None, base_size:
             "dry_run": True,
             "venue": trading_venue_label(),
             "symbol": selected_symbol(state.position_symbol),
-            "leverage": MAX_LEVERAGE if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures" else 1.0,
+            "leverage": order_leverage,
             "side": side,
             "quote_size": quote_size,
             "base_size": base_size,
@@ -1405,15 +1419,14 @@ def daily_loss_limit_reached(balance: float) -> bool:
     return drawdown >= MAX_DAILY_LOSS
 
 
-def calculate_position_size(balance: float, price: float, atr_val: float) -> float:
+def calculate_position_size(balance: float, price: float, atr_val: float, adx_value: float = 0.0) -> float:
     if atr_val <= 0 or price <= 0 or balance <= 0:
         return 0.0
     risk_amount = balance * MAX_RISK_PER_TRADE
     stop_distance = atr_val * ATR_STOP_MULTIPLIER
     btc_size = risk_amount / stop_distance
     max_notional = balance * MAX_POSITION_BALANCE_PCT
-    if EXCHANGE == "kraken" and EXCHANGE_MODE == "futures":
-        max_notional *= MAX_LEVERAGE
+    max_notional *= effective_leverage(adx_value)
     usd_size = min(btc_size * price, max_notional)
     if usd_size < MIN_ORDER_USD:
         return 0.0
@@ -1547,6 +1560,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Watchlist: {', '.join(WATCHLIST)}\n"
         f"Producto: {selected_symbol(state.position_symbol)}\n"
         f"Apalancamiento max: {MAX_LEVERAGE:.2f}x\n"
+        f"Apalancamiento dinamico: {DYNAMIC_LEVERAGE_ENABLED}\n"
+        f"ADX 3x: >= {DYNAMIC_LEVERAGE_STRONG_ADX:.2f}\n"
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
         f"ALLOW_SHORT_SIGNALS: {ALLOW_SHORT_SIGNALS}\n"
@@ -1604,6 +1619,7 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
                 order_side,
                 base_size=state.position_size_btc if state.side == "LONG" else None,
                 quote_size=None if state.side == "LONG" else state.position_usd,
+                leverage=float(position.get("leverage", effective_leverage(analysis.get("hourly", {}).get("adx", 0.0)))),
             )
             pnl = record_trade_pnl(price)
             await send_trade_to_backend(price, pnl)
@@ -1647,7 +1663,9 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
 
     price = float(analysis.get("price", 0.0))
     atr_used = float(analysis.get("atr", 0.0)) or float(analysis.get("hourly", {}).get("atr", 0.0))
-    size = calculate_position_size(balance, price, atr_used)
+    adx_used = float(analysis.get("hourly", {}).get("adx", 0.0))
+    leverage_used = effective_leverage(adx_used)
+    size = calculate_position_size(balance, price, atr_used, adx_used)
     usd_size = size * price
     if usd_size < MIN_ORDER_USD:
         logger.info("position_size_below_min symbol=%s usd_size=%.2f min=%.2f", symbol, usd_size, MIN_ORDER_USD)
@@ -1664,7 +1682,7 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         order_side = "SELL"
 
     state.position_symbol = symbol
-    place_market_order(order_side, quote_size=usd_size if order_side == "BUY" else None, base_size=size)
+    place_market_order(order_side, quote_size=usd_size if order_side == "BUY" else None, base_size=size, leverage=leverage_used)
     opened_at = time.time()
     position = {
         "symbol": symbol,
@@ -1675,6 +1693,7 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         "stop_loss": stop,
         "initial_stop_loss": stop,
         "take_profit": take,
+        "leverage": leverage_used,
         "highest_price": price,
         "lowest_price": price,
         "last_trade_ts": opened_at,
@@ -1686,11 +1705,24 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
     state.last_trade_ts = opened_at
     set_state_from_position(position)
     save_state()
-    logger.info("position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f stop=%.2f take=%.2f open_positions=%s", symbol, side, price, usd_size, size, stop, take, len(active_positions()))
+    logger.info(
+        "position_opened symbol=%s side=%s price=%.2f usd=%.2f size=%.8f leverage=%.2fx adx=%.2f stop=%.2f take=%.2f open_positions=%s",
+        symbol,
+        side,
+        price,
+        usd_size,
+        size,
+        leverage_used,
+        adx_used,
+        stop,
+        take,
+        len(active_positions()),
+    )
     await send_telegram(
         app,
         f"{symbol} {'Compra' if side == 'LONG' else 'Venta'} {'simulada' if DRY_RUN else 'real'}\n"
         f"Precio: {price:.2f}\nUSD: {usd_size:.2f}\nSize: {size:.8f}\n"
+        f"Apalancamiento: {leverage_used:.2f}x\nADX 1H: {adx_used:.2f}\n"
         f"Stop: {stop:.2f}\nTake Profit: {take:.2f}\nATR usado: {atr_used:.2f}\n"
         f"Confianza: {float(analysis.get('confidence', 0.0)):.2f}\nRazon: {analysis.get('reason', '')}",
     )

@@ -30,6 +30,10 @@ MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("BACKTEST_MIN_MINUTES_BETWEEN_TRADES"
 MAX_TRADES_PER_DAY = int(os.getenv("BACKTEST_MAX_TRADES_PER_DAY", "3"))
 MAX_RISK_PER_TRADE = float(os.getenv("BACKTEST_MAX_RISK_PER_TRADE", "0.0125"))
 MAX_POSITION_BALANCE_PCT = float(os.getenv("BACKTEST_MAX_POSITION_BALANCE_PCT", "0.25"))
+DYNAMIC_LEVERAGE_ENABLED = os.getenv("BACKTEST_DYNAMIC_LEVERAGE_ENABLED", "false").lower().strip() == "true"
+DYNAMIC_LEVERAGE_MID = float(os.getenv("BACKTEST_DYNAMIC_LEVERAGE_MID", "2.0"))
+DYNAMIC_LEVERAGE_MAX = float(os.getenv("BACKTEST_DYNAMIC_LEVERAGE_MAX", "3.0"))
+DYNAMIC_LEVERAGE_STRONG_ADX = float(os.getenv("BACKTEST_DYNAMIC_LEVERAGE_STRONG_ADX", "30.0"))
 KRAKEN_FEE_RATE = float(os.getenv("BACKTEST_FEE_RATE", "0.0026"))
 ATR_STOP_MULTIPLIER = float(os.getenv("BACKTEST_ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
@@ -265,13 +269,22 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
     }
 
 
-def calculate_position_size(balance: float, price: float, atr_value: float) -> float:
+def effective_leverage(adx_value: float) -> float:
+    if not DYNAMIC_LEVERAGE_ENABLED:
+        return 1.0
+    if adx_value >= DYNAMIC_LEVERAGE_STRONG_ADX:
+        return DYNAMIC_LEVERAGE_MAX
+    return DYNAMIC_LEVERAGE_MID
+
+
+def calculate_position_size(balance: float, price: float, atr_value: float, adx_value: float) -> float:
     if balance <= 0 or price <= 0 or atr_value <= 0:
         return 0.0
     risk_amount = balance * MAX_RISK_PER_TRADE
     stop_distance = atr_value * ATR_STOP_MULTIPLIER
     btc_size = risk_amount / stop_distance
-    usd_size = min(btc_size * price, balance * MAX_POSITION_BALANCE_PCT)
+    max_notional = balance * MAX_POSITION_BALANCE_PCT * effective_leverage(adx_value)
+    usd_size = min(btc_size * price, max_notional)
     return usd_size / price if usd_size > 0 else 0.0
 
 
@@ -306,7 +319,8 @@ class Backtester:
         side = signal["signal"]
         entry_price = float(candle["close"])
         atr_value = float(signal["atr"])
-        size = calculate_position_size(self.balance, entry_price, atr_value)
+        adx_value = float(candle["adx"])
+        size = calculate_position_size(self.balance, entry_price, atr_value, adx_value)
         if size <= 0:
             return
 
@@ -470,6 +484,10 @@ def main() -> None:
         "cooldown_minutes": MIN_MINUTES_BETWEEN_TRADES,
         "trailing_atr": ATR_TRAILING_MULTIPLIER,
         "require_mtf_macd": REQUIRE_MTF_MACD_CONFIRM,
+        "dynamic_leverage": DYNAMIC_LEVERAGE_ENABLED,
+        "leverage_mid": DYNAMIC_LEVERAGE_MID,
+        "leverage_max": DYNAMIC_LEVERAGE_MAX,
+        "leverage_strong_adx": DYNAMIC_LEVERAGE_STRONG_ADX,
     }
     generate_outputs(trades, equity_curve, data["1H"], INITIAL_CAPITAL, final_capital, metadata=metadata)
 
