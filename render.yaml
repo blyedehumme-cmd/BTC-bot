@@ -51,7 +51,7 @@ services:
       - key: DYNAMIC_LEVERAGE_MID
         value: "2"
       - key: WATCHLIST
-        value: BTC
+        value: BTC,ETH
       - key: MAX_TRADES_PER_DAY
         value: "3"
       - key: MIN_MINUTES_BETWEEN_TRADES

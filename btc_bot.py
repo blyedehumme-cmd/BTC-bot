@@ -54,7 +54,7 @@ KRAKEN_BASE_ASSET = os.getenv("KRAKEN_BASE_ASSET", "XXBT").strip()
 KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
 KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
 KRAKEN_FUTURES_API_URL = os.getenv("KRAKEN_FUTURES_API_URL", "https://futures.kraken.com").strip().rstrip("/")
-WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC").split(",") if item.strip()]
+WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC,ETH").split(",") if item.strip()]
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
