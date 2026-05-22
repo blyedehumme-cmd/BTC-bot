@@ -101,8 +101,11 @@ REQUIRE_MTF_MACD_CONFIRM = os.getenv("REQUIRE_MTF_MACD_CONFIRM", "true").lower()
 AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
 MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
 MAX_ENTRY_EMA21_ATR_DISTANCE = float(os.getenv("MAX_ENTRY_EMA21_ATR_DISTANCE", "2.5"))
+MAX_ENTRY_EMA50_ATR_DISTANCE = float(os.getenv("MAX_ENTRY_EMA50_ATR_DISTANCE", "4.0"))
 SAME_SIDE_WIN_STREAK_LIMIT = int(os.getenv("SAME_SIDE_WIN_STREAK_LIMIT", "3"))
 WIN_STREAK_PULLBACK_ATR_DISTANCE = float(os.getenv("WIN_STREAK_PULLBACK_ATR_DISTANCE", "1.0"))
+NEWS_CONTEXT_URL = os.getenv("NEWS_CONTEXT_URL", "").strip()
+NEWS_RISK_CONTEXT = os.getenv("NEWS_RISK_CONTEXT", "").strip()
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -864,6 +867,8 @@ def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Di
     )
     atr_value = atr_real(candles, 14)
     latest_range = float(candles[-1]["high"]) - float(candles[-1]["low"])
+    ema21_distance_atr = abs(price - ema21_val) / atr_value if atr_value > 0 else 0.0
+    ema50_distance_atr = abs(price - ema50_val) / atr_value if atr_value > 0 else 0.0
     return {
         "trend": trend,
         "price": price,
@@ -875,6 +880,8 @@ def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Di
         "volume_ratio": volume_ratio(candles),
         "atr": atr_value,
         "volatility_ratio": latest_range / atr_value if atr_value > 0 else 0.0,
+        "ema21_distance_atr": ema21_distance_atr,
+        "ema50_distance_atr": ema50_distance_atr,
     }
 
 
@@ -901,6 +908,22 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
         return {}
 
 
+def news_risk_context() -> str:
+    if NEWS_RISK_CONTEXT:
+        return NEWS_RISK_CONTEXT[:1500]
+    if not NEWS_CONTEXT_URL:
+        return "Sin fuente de noticias configurada."
+    try:
+        response = requests.get(NEWS_CONTEXT_URL, timeout=8)
+        response.raise_for_status()
+        if response.headers.get("content-type", "").startswith("application/json"):
+            return json.dumps(response.json(), ensure_ascii=True)[:1500]
+        return response.text[:1500]
+    except Exception as exc:
+        logger.warning("news_context_failed error=%s", exc)
+        return f"Fuente de noticias no disponible: {exc}"
+
+
 def _ai_not_called(reason: str, score: float = 0.0) -> Dict[str, Any]:
     return {
         "allow": True,
@@ -917,7 +940,9 @@ def _format_analysis_block(label: str, data: Dict[str, Any]) -> str:
     return (
         f"{label}: trend={data['trend']}, price={data['price']}, ema21={data['ema21']}, "
         f"ema50={data['ema50']}, ema100={data['ema100']}, macd_hist={data['macd']['hist']}, "
-        f"adx={data['adx']}, volume_ratio={data['volume_ratio']}, atr={data.get('atr', 0.0)}"
+        f"adx={data['adx']}, volume_ratio={data['volume_ratio']}, atr={data.get('atr', 0.0)}, "
+        f"ema21_distance_atr={data.get('ema21_distance_atr', 0.0)}, "
+        f"ema50_distance_atr={data.get('ema50_distance_atr', 0.0)}"
     )
 
 
@@ -933,7 +958,14 @@ def _openai_assist(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[st
         f"{_format_analysis_block('Weekly', weekly)}\n"
         f"{_format_analysis_block('Daily', daily)}\n"
         f"{_format_analysis_block('4H', fourh)}\n"
-        f"{_format_analysis_block('1H', hourly)}"
+        f"{_format_analysis_block('1H', hourly)}\n"
+        "Reglas de riesgo adicionales:\n"
+        f"- Bloquear entradas tardias si el precio esta extendido contra EMA21/EMA50.\n"
+        f"- Max distancia EMA21: {MAX_ENTRY_EMA21_ATR_DISTANCE} ATR.\n"
+        f"- Max distancia EMA50: {MAX_ENTRY_EMA50_ATR_DISTANCE} ATR.\n"
+        f"- Racha de wins mismo lado requiere pullback despues de {SAME_SIDE_WIN_STREAK_LIMIT} wins.\n"
+        f"Contexto de noticias/calendario: {news_risk_context()}\n"
+        "Si el contexto de noticias indica riesgo alto contra la senal, responde allow=false."
     )
 
     def call() -> Dict[str, Any]:
@@ -1250,26 +1282,36 @@ def consecutive_same_side_wins(direction: str) -> int:
 def entry_extension_checks(direction: str, analysis: Dict[str, Any]) -> List[tuple[bool, float, str, str]]:
     price = float(analysis.get("price", 0.0))
     ema21_value = float(analysis.get("ema21", 0.0))
+    ema50_value = float(analysis.get("ema50", 0.0))
     atr_value = float(analysis.get("atr", 0.0))
-    if price <= 0 or ema21_value <= 0 or atr_value <= 0:
-        return [(False, 0.0, "Distancia EMA21 disponible", "No hay datos suficientes para medir extension contra EMA21")]
+    if price <= 0 or ema21_value <= 0 or ema50_value <= 0 or atr_value <= 0:
+        return [(False, 0.0, "Distancia EMA disponible", "No hay datos suficientes para medir extension contra EMA21/EMA50")]
 
-    distance_atr = abs(price - ema21_value) / atr_value
+    distance_ema21_atr = abs(price - ema21_value) / atr_value
+    distance_ema50_atr = abs(price - ema50_value) / atr_value
     if direction == "LONG":
-        overextended = price > ema21_value and distance_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        overextended_ema21 = price > ema21_value and distance_ema21_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        overextended_ema50 = price > ema50_value and distance_ema50_atr > MAX_ENTRY_EMA50_ATR_DISTANCE
         streak_pullback_ok = price <= ema21_value + atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE
     else:
-        overextended = price < ema21_value and distance_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        overextended_ema21 = price < ema21_value and distance_ema21_atr > MAX_ENTRY_EMA21_ATR_DISTANCE
+        overextended_ema50 = price < ema50_value and distance_ema50_atr > MAX_ENTRY_EMA50_ATR_DISTANCE
         streak_pullback_ok = price >= ema21_value - atr_value * WIN_STREAK_PULLBACK_ATR_DISTANCE
 
     streak = consecutive_same_side_wins(direction)
     needs_pullback = SAME_SIDE_WIN_STREAK_LIMIT > 0 and streak >= SAME_SIDE_WIN_STREAK_LIMIT
     return [
         (
-            not overextended,
+            not overextended_ema21,
             0.0,
-            f"Entrada no extendida contra EMA21 ({distance_atr:.2f} ATR)",
-            f"Entrada bloqueada: precio extendido {distance_atr:.2f} ATR desde EMA21",
+            f"Entrada no extendida contra EMA21 ({distance_ema21_atr:.2f} ATR)",
+            f"Entrada bloqueada: precio extendido {distance_ema21_atr:.2f} ATR desde EMA21",
+        ),
+        (
+            not overextended_ema50,
+            0.0,
+            f"Entrada no tardia contra EMA50 ({distance_ema50_atr:.2f} ATR)",
+            f"Entrada bloqueada: precio tardio {distance_ema50_atr:.2f} ATR desde EMA50",
         ),
         (
             not needs_pullback or streak_pullback_ok,
@@ -1723,7 +1765,9 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Volumen minimo: {VOLUME_HEALTH_MIN:.2f}x\n"
         f"MACD MTF obligatorio: {REQUIRE_MTF_MACD_CONFIRM}\n"
         f"Max extension EMA21: {MAX_ENTRY_EMA21_ATR_DISTANCE:.2f} ATR\n"
+        f"Max entrada tardia EMA50: {MAX_ENTRY_EMA50_ATR_DISTANCE:.2f} ATR\n"
         f"Racha wins mismo lado: {SAME_SIDE_WIN_STREAK_LIMIT}\n"
+        f"Noticias IA: {'configuradas' if NEWS_CONTEXT_URL or NEWS_RISK_CONTEXT else 'no configuradas'}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"
