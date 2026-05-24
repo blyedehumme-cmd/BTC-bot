@@ -20,6 +20,7 @@ DATA_SOURCE = os.getenv("BACKTEST_DATA_SOURCE", "coinbase").lower().strip()
 KRAKEN_REQUEST_SLEEP = float(os.getenv("KRAKEN_REQUEST_SLEEP", "2.0"))
 COINBASE_REQUEST_SLEEP = float(os.getenv("COINBASE_REQUEST_SLEEP", "0.35"))
 INTERVALS: Dict[str, int] = {
+    "15M": 15,
     "1H": 60,
     "4H": 240,
     "1D": 1440,

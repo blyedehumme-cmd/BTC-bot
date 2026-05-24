@@ -24,6 +24,7 @@ equity_curve.png
 price_trades.png
 pnl_distribution.png
 drawdown.png
+hmm_reports/
 data/*.csv
 !data/.gitkeep
 
