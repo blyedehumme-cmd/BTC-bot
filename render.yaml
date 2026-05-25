@@ -36,6 +36,12 @@ services:
         value: "true"
       - key: USE_AI_ASSIST
         value: "false"
+      - key: ENABLE_HMM_FILTER
+        value: "false"
+      - key: ALLOWED_HMM_REGIMES
+        value: ""
+      - key: HMM_REGIME_CONTEXT
+        value: ""
       - key: PRODUCT_ID
         value: BTC-USDC
       - key: EXCHANGE

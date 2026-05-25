@@ -33,6 +33,7 @@ import requests
 from coinbase.rest import RESTClient
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from supervisor.supervisor import evaluate_supervisor
 
 # =========================
 # CONFIGURACION
@@ -84,6 +85,9 @@ USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "false").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+ENABLE_HMM_FILTER = os.getenv("ENABLE_HMM_FILTER", "false").lower().strip() == "true"
+ALLOWED_HMM_REGIMES_RAW = os.getenv("ALLOWED_HMM_REGIMES", "").strip()
+HMM_REGIME_CONTEXT = os.getenv("HMM_REGIME_CONTEXT", "").strip()
 
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "").strip().rstrip("/")
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
@@ -106,6 +110,12 @@ SAME_SIDE_WIN_STREAK_LIMIT = int(os.getenv("SAME_SIDE_WIN_STREAK_LIMIT", "3"))
 WIN_STREAK_PULLBACK_ATR_DISTANCE = float(os.getenv("WIN_STREAK_PULLBACK_ATR_DISTANCE", "1.0"))
 NEWS_CONTEXT_URL = os.getenv("NEWS_CONTEXT_URL", "").strip()
 NEWS_RISK_CONTEXT = os.getenv("NEWS_RISK_CONTEXT", "").strip()
+
+ALLOWED_HMM_REGIMES = {
+    int(item.strip())
+    for item in ALLOWED_HMM_REGIMES_RAW.split(",")
+    if item.strip().isdigit()
+} or None
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -1432,6 +1442,79 @@ def choose_trade_analysis(analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
     return max(candidates, key=lambda item: float(item.get("opportunity_score", item.get("confidence", 0.0)))) if candidates else empty_analysis("Watchlist vacio.", 0.0)
 
 
+def attach_hmm_context(analysis: Dict[str, Any]) -> None:
+    if not HMM_REGIME_CONTEXT:
+        return
+    try:
+        context = json.loads(HMM_REGIME_CONTEXT)
+    except json.JSONDecodeError:
+        logger.warning("invalid_hmm_regime_context value=%s", HMM_REGIME_CONTEXT[:120])
+        return
+    symbol = str(analysis.get("symbol", WATCHLIST[0])).upper()
+    raw = context.get(symbol, context) if isinstance(context, dict) else {}
+    if not isinstance(raw, dict):
+        return
+    if "regime" in raw:
+        analysis["hmm_regime"] = raw.get("regime")
+    if "label" in raw:
+        analysis["hmm_regime_label"] = raw.get("label")
+    if "source" in raw:
+        analysis["hmm_source"] = raw.get("source")
+
+
+def evaluate_supervised_analysis(analysis: Dict[str, Any], balance: float) -> Dict[str, Any]:
+    attach_hmm_context(analysis)
+    price = float(analysis.get("price", 0.0))
+    entry_analysis = analysis.get("entry_analysis") or analysis.get("hourly", {})
+    atr_used = float(analysis.get("atr", 0.0)) or float(entry_analysis.get("atr", 0.0))
+    adx_used = float(entry_analysis.get("adx", 0.0))
+    leverage_used = effective_leverage(adx_used)
+    size = calculate_position_size(balance, price, atr_used, adx_used)
+    usd_size = size * price
+    stop_distance = atr_used * ATR_STOP_MULTIPLIER if atr_used > 0 else 0.0
+    risk_amount = balance * MAX_RISK_PER_TRADE
+    can_open = can_trade_now(ignore_interval=len(active_positions()) > 0)
+    decision = evaluate_supervisor(
+        analysis,
+        min_confidence=MIN_CONFIDENCE,
+        use_ai_assist=USE_AI_ASSIST,
+        hmm_filter_enabled=ENABLE_HMM_FILTER,
+        allowed_hmm_regimes=ALLOWED_HMM_REGIMES,
+        active_positions=len(active_positions()),
+        max_open_positions=MAX_OPEN_POSITIONS,
+        daily_trades=state.daily_trades,
+        max_trades_per_day=MAX_TRADES_PER_DAY,
+        can_trade=can_open,
+        usd_size=usd_size,
+        min_order_usd=MIN_ORDER_USD,
+        risk_amount=risk_amount,
+        stop_distance=stop_distance,
+        leverage=leverage_used,
+    )
+    payload = decision.to_dict()
+    analysis["supervisor_decision"] = payload
+    analysis["supervisor_approved"] = decision.approved
+    analysis["supervisor_reason"] = decision.reason
+    analysis["risk_preview"] = {
+        "balance": balance,
+        "risk_amount": risk_amount,
+        "notional_usd": usd_size,
+        "stop_distance": stop_distance,
+        "leverage": leverage_used,
+        "atr": atr_used,
+        "adx": adx_used,
+    }
+    logger.info(
+        "supervisor_decision symbol=%s signal=%s approved=%s action=%s reason=%s",
+        analysis.get("symbol"),
+        analysis.get("signal"),
+        decision.approved,
+        decision.action,
+        decision.reason,
+    )
+    return analysis
+
+
 # =========================
 # BACKEND PAYLOADS
 # =========================
@@ -1457,6 +1540,7 @@ def build_market_snapshot_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
 def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
     confidence = int(round(float(analysis.get("confidence", 0.0)) * 100))
     direction = analysis.get("signal", "WAIT")
+    supervisor_approved = bool(analysis.get("supervisor_approved", direction in ["LONG", "SHORT"]))
     return {
         "symbol": analysis.get("trade_symbol", selected_symbol(str(analysis.get("symbol", WATCHLIST[0])))),
         "timeframe": analysis.get("entry_timeframe", "1H"),
@@ -1464,7 +1548,7 @@ def build_signal_payload(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "confidence_score": max(0, min(confidence, 100)),
         "risk_level": "low" if confidence >= 80 else "medium" if confidence >= 50 else "high",
         "market_condition": (analysis.get("entry_analysis") or analysis.get("hourly", {})).get("trend", "neutral"),
-        "approved": direction in ["LONG", "SHORT"],
+        "approved": direction in ["LONG", "SHORT"] and supervisor_approved,
         "explanation": analysis.get("reason", "No reason provided."),
         "created_at": datetime.utcnow().isoformat() + "Z",
     }
@@ -1496,22 +1580,34 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
         "volatility_ratio": analysis.get("volatility_ratio"),
         "strategy_checks": analysis.get("strategy_checks", []),
         "blocked_reasons": analysis.get("blocked_reasons", []),
+        "hmm_regime": analysis.get("hmm_regime"),
+        "hmm_regime_label": analysis.get("hmm_regime_label"),
+        "hmm_source": analysis.get("hmm_source"),
+        "risk_preview": analysis.get("risk_preview", {}),
+        "supervisor_decision": analysis.get("supervisor_decision", {}),
+        "supervisor_approved": analysis.get("supervisor_approved", False),
+        "supervisor_reason": analysis.get("supervisor_reason", ""),
         "ai_called": ai_called,
         "ai_rate_limited": ai_rate_limited,
         "ai_feedback": analysis.get("ai_feedback", {}),
     }
+    supervisor_approved = bool(analysis.get("supervisor_approved", direction in ["LONG", "SHORT"]))
     if ai_rate_limited:
         decision_type = "ai_rate_limited"
-    elif direction in ["LONG", "SHORT"]:
+    elif direction in ["LONG", "SHORT"] and supervisor_approved:
         decision_type = "signal_approved"
+    elif direction in ["LONG", "SHORT"] and not supervisor_approved:
+        decision_type = "supervisor_blocked"
     elif ai_called and "confirmacion IA" in reason:
         decision_type = "ai_rejected"
     else:
         decision_type = "analysis_wait"
 
     backend_explanation = reason
+    if analysis.get("supervisor_reason"):
+        backend_explanation = f"{backend_explanation}\n\nSupervisor: {analysis.get('supervisor_reason')}"
     if ai_called and ai_explanation:
-        backend_explanation = f"{reason}\n\nExplicacion IA real: {ai_explanation}"
+        backend_explanation = f"{backend_explanation}\n\nExplicacion IA real: {ai_explanation}"
 
     return {
         "signal_id": signal_id,
@@ -1874,6 +1970,14 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         return False
 
     side = str(analysis["signal"])
+    if not analysis.get("supervisor_approved", False):
+        logger.info(
+            "supervisor_blocked symbol=%s side=%s reason=%s",
+            symbol,
+            side,
+            analysis.get("supervisor_reason", "sin razon"),
+        )
+        return False
     if side == "LONG":
         stop = price - atr_used * ATR_STOP_MULTIPLIER
         take = price + atr_used * ATR_TAKE_PROFIT_MULTIPLIER
@@ -1947,9 +2051,13 @@ async def trading_loop(app: Optional[Application]) -> None:
             scan_symbols = [symbol for symbol in WATCHLIST if symbol not in open_symbols]
             scan_analyses = [analyze_market(symbol) for symbol in scan_symbols] if len(open_symbols) < MAX_OPEN_POSITIONS else []
             analyses = managed_analyses + scan_analyses
+            balance = DRY_RUN_BALANCE + state.stats.simulated_pnl_usd if DRY_RUN else get_usdc_balance()
+            for item in scan_analyses:
+                evaluate_supervised_analysis(item, balance)
+            for item in managed_analyses:
+                attach_hmm_context(item)
             analysis = choose_trade_analysis(analyses)
             price = float(analysis.get("price", 0.0))
-            balance = DRY_RUN_BALANCE + state.stats.simulated_pnl_usd if DRY_RUN else get_usdc_balance()
             reset_daily_balance_if_needed(balance)
             await sync_bot_control_from_backend()
 
@@ -1978,7 +2086,7 @@ async def trading_loop(app: Optional[Application]) -> None:
             await publish_analyses_to_backend(ordered_analyses)
 
             actionable = sorted(
-                [item for item in scan_analyses if item.get("signal") in ["LONG", "SHORT"]],
+                [item for item in scan_analyses if item.get("signal") in ["LONG", "SHORT"] and item.get("supervisor_approved")],
                 key=lambda item: float(item.get("confidence", 0.0)),
                 reverse=True,
             )
