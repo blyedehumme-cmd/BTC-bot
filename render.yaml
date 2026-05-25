@@ -44,6 +44,10 @@ services:
         value: ""
       - key: HMM_REGIME_CONTEXT_FILE
         value: ""
+      - key: STRATEGY_PROFILE
+        value: btc_swing_v1
+      - key: OPTIMIZED_SYMBOLS
+        value: BTC
       - key: PRODUCT_ID
         value: BTC-USDC
       - key: EXCHANGE
@@ -59,7 +63,7 @@ services:
       - key: DYNAMIC_LEVERAGE_MID
         value: "2"
       - key: WATCHLIST
-        value: BTC,ETH
+        value: BTC
       - key: MAX_TRADES_PER_DAY
         value: "3"
       - key: MIN_MINUTES_BETWEEN_TRADES

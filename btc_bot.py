@@ -57,6 +57,8 @@ KRAKEN_QUOTE_ASSET = os.getenv("KRAKEN_QUOTE_ASSET", "ZUSD").strip()
 KRAKEN_API_URL = os.getenv("KRAKEN_API_URL", "https://api.kraken.com").strip().rstrip("/")
 KRAKEN_FUTURES_API_URL = os.getenv("KRAKEN_FUTURES_API_URL", "https://futures.kraken.com").strip().rstrip("/")
 WATCHLIST = [item.strip().upper() for item in os.getenv("WATCHLIST", "BTC,ETH").split(",") if item.strip()]
+STRATEGY_PROFILE = os.getenv("STRATEGY_PROFILE", "btc_swing_v1").strip()
+OPTIMIZED_SYMBOLS = [item.strip().upper() for item in os.getenv("OPTIMIZED_SYMBOLS", "BTC").split(",") if item.strip()]
 DRY_RUN = os.getenv("DRY_RUN", "true").lower().strip() == "true"
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower().strip() == "true"
 ALLOW_REAL_SPOT_SHORT = os.getenv("ALLOW_REAL_SPOT_SHORT", "false").lower().strip() == "true"
@@ -1662,6 +1664,8 @@ def build_ai_decision_payload(analysis: Dict[str, Any], signal_id: int = 0) -> D
         "hmm_regime": analysis.get("hmm_regime"),
         "hmm_regime_label": analysis.get("hmm_regime_label"),
         "hmm_source": analysis.get("hmm_source"),
+        "strategy_profile": STRATEGY_PROFILE,
+        "optimized_symbols": OPTIMIZED_SYMBOLS,
         "risk_preview": analysis.get("risk_preview", {}),
         "supervisor_decision": analysis.get("supervisor_decision", {}),
         "supervisor_approved": analysis.get("supervisor_approved", False),
@@ -2004,6 +2008,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "Configuracion\n"
         f"Exchange: {EXCHANGE}\n"
         f"Modo exchange: {EXCHANGE_MODE}\n"
+        f"Perfil estrategia: {STRATEGY_PROFILE}\n"
+        f"Optimizada para: {', '.join(OPTIMIZED_SYMBOLS)}\n"
         f"Watchlist: {', '.join(WATCHLIST)}\n"
         f"Temporalidades entrada: 30M, 1H, 4H, 1D\n"
         f"Producto: {selected_symbol(state.position_symbol)}\n"
@@ -2204,7 +2210,11 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
 # =========================
 
 async def trading_loop(app: Optional[Application]) -> None:
-    await send_telegram(app, f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Exchange={EXCHANGE} Producto={selected_symbol()}")
+    await send_telegram(
+        app,
+        f"BTC Bot Seguro iniciado. DRY_RUN={DRY_RUN} Exchange={EXCHANGE} "
+        f"Producto={selected_symbol()} Perfil={STRATEGY_PROFILE} Optimizada={','.join(OPTIMIZED_SYMBOLS)}",
+    )
     while True:
         try:
             managed_analyses = await manage_existing_positions(app)

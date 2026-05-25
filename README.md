@@ -2,6 +2,21 @@
 
 Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión de riesgo y IA asistida.
 
+## Perfil activo: BTC Swing v1
+
+La configuración de producción actual queda marcada como `btc_swing_v1` y está optimizada solo para BTC. No debe asumirse que estos mismos parámetros funcionan igual en ETH u otras criptomonedas.
+
+Resultado de referencia del backtest BTC swing validado:
+
+- Capital inicial: `$5,000.00`
+- Capital final: `$17,051.51`
+- Retorno total: `+241.03%`
+- Max drawdown: `-14.60%`
+- Win rate: `48.85%`
+- Trailing stop: `2.0 ATR` simple
+
+Por esa razón, el `WATCHLIST` de Render queda en `BTC` mientras ETH se trabaja como una estrategia separada. La próxima fase debe crear un perfil independiente, por ejemplo `eth_swing_v1`, con backtest propio antes de activarlo en producción.
+
 ## Características principales
 
 - Multi-timeframe: 1W, 1D, 4H, 1H
@@ -34,6 +49,9 @@ Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión 
   - `KRAKEN_FUTURES_SYMBOL` (por defecto `PI_XBTUSD`)
   - `KRAKEN_QUOTE_ASSET` (por defecto `ZUSD`)
   - `MAX_LEVERAGE` (capado internamente a `3x`)
+  - `STRATEGY_PROFILE` (`btc_swing_v1` para la estrategia BTC actual)
+  - `OPTIMIZED_SYMBOLS` (`BTC` en producción hasta validar ETH por separado)
+  - `WATCHLIST` (`BTC` en producción para este perfil)
   - `DRY_RUN` (`true` o `false`)
   - `USE_AI_ASSIST` (`true` o `false`)
   - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)

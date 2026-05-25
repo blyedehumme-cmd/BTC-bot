@@ -22,6 +22,8 @@ from report import generate_outputs
 
 
 BACKTEST_PROFILE = os.getenv("BACKTEST_PROFILE", "improved").lower().strip()
+BACKTEST_STRATEGY_PROFILE = os.getenv("BACKTEST_STRATEGY_PROFILE", "btc_swing_v1").strip()
+BACKTEST_OPTIMIZED_SYMBOL = os.getenv("BACKTEST_OPTIMIZED_SYMBOL", "BTC").strip().upper()
 INITIAL_CAPITAL = float(os.getenv("BACKTEST_INITIAL_CAPITAL", "5000"))
 MIN_CONFIDENCE = float(os.getenv("BACKTEST_MIN_CONFIDENCE", "0.70"))
 ADX_THRESHOLD = float(os.getenv("BACKTEST_ADX_THRESHOLD", "20.0"))
@@ -508,6 +510,8 @@ def main() -> None:
     trades, equity_curve, final_capital = backtester.run()
     metadata = {
         "perfil": BACKTEST_PROFILE,
+        "strategy_profile": BACKTEST_STRATEGY_PROFILE,
+        "optimized_symbol": BACKTEST_OPTIMIZED_SYMBOL,
         "fee_rate": KRAKEN_FEE_RATE,
         "adx_threshold": ADX_THRESHOLD,
         "volume_min": VOLUME_HEALTH_MIN,
