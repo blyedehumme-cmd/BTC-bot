@@ -105,7 +105,8 @@ ADX_PERIOD = 14
 ADX_THRESHOLD = float(os.getenv("ADX_THRESHOLD", "24.0"))
 VOLUME_HEALTH_MIN = float(os.getenv("VOLUME_HEALTH_MIN", "0.60"))
 REQUIRE_MTF_MACD_CONFIRM = os.getenv("REQUIRE_MTF_MACD_CONFIRM", "true").lower().strip() == "true"
-AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.08"))
+AI_CONFIDENCE_BUFFER = float(os.getenv("AI_CONFIDENCE_BUFFER", "0.00"))
+OPENAI_MIN_SECONDS_BETWEEN_CALLS = int(os.getenv("OPENAI_MIN_SECONDS_BETWEEN_CALLS", "1800"))
 MAX_CANDLE_ATR_MULTIPLIER = float(os.getenv("MAX_CANDLE_ATR_MULTIPLIER", "2.5"))
 MAX_ENTRY_EMA21_ATR_DISTANCE = float(os.getenv("MAX_ENTRY_EMA21_ATR_DISTANCE", "2.5"))
 MAX_ENTRY_EMA50_ATR_DISTANCE = float(os.getenv("MAX_ENTRY_EMA50_ATR_DISTANCE", "4.0"))
@@ -178,6 +179,7 @@ logging.basicConfig(
 logger = logging.getLogger("btc-bot")
 client: Optional[RESTClient] = None
 telegram_bot: Optional[Bot] = None
+ai_decision_cache: Dict[str, Dict[str, Any]] = {}
 
 
 # =========================
@@ -836,6 +838,8 @@ def volume_ratio(candles: List[Dict[str, Any]], period: int = 20) -> float:
 
 def empty_timeframe(price: float = 0.0) -> Dict[str, Any]:
     return {
+        "timeframe": "",
+        "last_candle_ts": 0,
         "trend": "neutral",
         "price": price,
         "ema21": 0.0,
@@ -867,7 +871,10 @@ def empty_analysis(reason: str, price: float = 0.0) -> Dict[str, Any]:
 def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Dict[str, Any]:
     closes = [float(candle["close"]) for candle in candles]
     if len(closes) < EMA_SLOW + 1:
-        return empty_timeframe(closes[-1] if closes else 0.0)
+        frame = empty_timeframe(closes[-1] if closes else 0.0)
+        frame["timeframe"] = timeframe
+        frame["last_candle_ts"] = int(candles[-1].get("start", 0)) if candles else 0
+        return frame
 
     ema21_val = ema(closes[-80:], EMA_FAST)
     ema50_val = ema(closes[-120:], EMA_MID)
@@ -883,6 +890,8 @@ def timeframe_analysis(candles: List[Dict[str, Any]], timeframe: str = "") -> Di
     ema21_distance_atr = abs(price - ema21_val) / atr_value if atr_value > 0 else 0.0
     ema50_distance_atr = abs(price - ema50_val) / atr_value if atr_value > 0 else 0.0
     return {
+        "timeframe": timeframe,
+        "last_candle_ts": int(candles[-1].get("start", 0)),
         "trend": trend,
         "price": price,
         "ema21": ema21_val,
@@ -942,6 +951,7 @@ def _ai_not_called(reason: str, score: float = 0.0) -> Dict[str, Any]:
         "allow": True,
         "score": score,
         "called_openai": False,
+        "cache_hit": False,
         "rate_limited": False,
         "reasons": [reason],
         "openai": {},
@@ -1023,7 +1033,42 @@ def _openai_assist(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[st
         }
 
 
-def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any], direction: str = "") -> Dict[str, Any]:
+def ai_cache_key(symbol: str, direction: str, hourly: Dict[str, Any]) -> str:
+    return ":".join([
+        symbol.upper() or "UNKNOWN",
+        str(hourly.get("timeframe", "1H")),
+        direction.upper() or "UNKNOWN",
+        str(int(hourly.get("last_candle_ts", 0))),
+    ])
+
+
+def cached_openai_feedback(symbol: str, direction: str, hourly: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    key = ai_cache_key(symbol, direction, hourly)
+    cached = ai_decision_cache.get(key)
+    if not cached:
+        return None
+    age = time.time() - float(cached.get("ts", 0.0))
+    if age > OPENAI_MIN_SECONDS_BETWEEN_CALLS:
+        ai_decision_cache.pop(key, None)
+        return None
+    logger.info("openai_cache_hit key=%s age=%.0fs ttl=%ss", key, age, OPENAI_MIN_SECONDS_BETWEEN_CALLS)
+    return dict(cached.get("feedback", {}))
+
+
+def store_openai_feedback(symbol: str, direction: str, hourly: Dict[str, Any], feedback: Dict[str, Any]) -> None:
+    key = ai_cache_key(symbol, direction, hourly)
+    ai_decision_cache[key] = {"ts": time.time(), "feedback": dict(feedback)}
+    logger.info("openai_cache_store key=%s ttl=%ss", key, OPENAI_MIN_SECONDS_BETWEEN_CALLS)
+
+
+def ai_assist_analysis(
+    weekly: Dict[str, Any],
+    daily: Dict[str, Any],
+    fourh: Dict[str, Any],
+    hourly: Dict[str, Any],
+    direction: str = "",
+    symbol: str = "",
+) -> Dict[str, Any]:
     score = 0.0
     reasons: List[str] = []
     checks = [
@@ -1041,9 +1086,17 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
             reasons.append(bad_reason)
 
     allow = score >= 0.60
-    openai_feedback = _openai_assist(weekly, daily, fourh, hourly, direction)
-    called_openai = bool(USE_AI_ASSIST and OPENAI_API_KEY)
+    openai_feedback = cached_openai_feedback(symbol, direction, hourly) or {}
+    cache_hit = bool(openai_feedback)
+    called_openai = bool(USE_AI_ASSIST and OPENAI_API_KEY and not cache_hit)
+    if not openai_feedback:
+        openai_feedback = _openai_assist(weekly, daily, fourh, hourly, direction)
+        if openai_feedback:
+            store_openai_feedback(symbol, direction, hourly, openai_feedback)
     openai_explanation_parts: List[str] = []
+    if cache_hit:
+        reasons.append("IA reutilizada desde cache para esta misma vela/senal")
+        openai_explanation_parts.append("IA reutilizada desde cache para esta misma vela/senal")
     if openai_feedback:
         openai_allow = openai_feedback.get("allow")
         if isinstance(openai_allow, bool):
@@ -1076,12 +1129,13 @@ def ai_assist_analysis(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dic
         "reasons": reasons,
         "openai": openai_feedback,
         "called_openai": called_openai,
+        "cache_hit": cache_hit,
         "rate_limited": bool(openai_feedback.get("rate_limited")) if isinstance(openai_feedback, dict) else False,
         "openai_explanation": openai_explanation,
     }
 
 
-def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any]) -> Dict[str, Any]:
+def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any], symbol: str = "") -> Dict[str, Any]:
     atr_value = float(hourly.get("atr", 0.0))
     volatility_ratio = float(hourly.get("volatility_ratio", 0.0))
     volatility_ok = volatility_ratio <= MAX_CANDLE_ATR_MULTIPLIER if volatility_ratio > 0 else True
@@ -1200,7 +1254,7 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         )
         ai_reason = f"IA omitida: {'|'.join(ai_evaluation['reasons'])}"
     else:
-        ai_evaluation = ai_assist_analysis(weekly, daily, fourh, hourly, best_direction)
+        ai_evaluation = ai_assist_analysis(weekly, daily, fourh, hourly, best_direction, symbol)
         ai_reason = f"IA: {'|'.join(ai_evaluation['reasons'])}"
 
     base = {
@@ -1208,6 +1262,7 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         "atr": atr_value,
         "ai_called": ai_evaluation.get("called_openai", False),
         "ai_rate_limited": ai_evaluation.get("rate_limited", False),
+        "ai_cache_hit": ai_evaluation.get("cache_hit", False),
         "ai_explanation": ai_evaluation.get("openai_explanation", ""),
         "ai_feedback": ai_evaluation.get("openai", {}),
         "strategy_checks": best_candidate.get("checks", []),
@@ -1239,7 +1294,7 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             "reason": f"Confianza insuficiente para {best_direction}. {ai_reason}",
         }
 
-    if USE_AI_ASSIST and ai_evaluation.get("called_openai") and not ai_evaluation["allow"]:
+    if USE_AI_ASSIST and not ai_evaluation["allow"]:
         return {
             **base,
             "signal": "WAIT",
@@ -1342,6 +1397,7 @@ def build_entry_timeframe_signal(
     fourh: Dict[str, Any],
     hourly: Dict[str, Any],
     thirtym: Dict[str, Any],
+    symbol: str = "",
 ) -> Dict[str, Any]:
     entry_map = {
         "30M": thirtym,
@@ -1351,7 +1407,7 @@ def build_entry_timeframe_signal(
     }
     entry = entry_map[entry_timeframe]
     if entry_timeframe == "30M":
-        signal = build_signal(weekly, daily, fourh, thirtym)
+        signal = build_signal(weekly, daily, fourh, thirtym, symbol)
         direction = str(signal.get("signal", "WAIT"))
         if direction in ["LONG", "SHORT"] and not _direction_matches(direction, hourly):
             signal = {
@@ -1360,11 +1416,11 @@ def build_entry_timeframe_signal(
                 "reason": f"30M dio {direction}, pero 1H no confirma la misma direccion.",
             }
     elif entry_timeframe == "1H":
-        signal = build_signal(weekly, daily, fourh, hourly)
+        signal = build_signal(weekly, daily, fourh, hourly, symbol)
     elif entry_timeframe == "4H":
-        signal = build_signal(weekly, daily, daily, fourh)
+        signal = build_signal(weekly, daily, daily, fourh, symbol)
     else:
-        signal = build_signal(weekly, daily, daily, daily)
+        signal = build_signal(weekly, daily, daily, daily, symbol)
 
     adx_component = min(float(entry.get("adx", 0.0)) / 100.0, 0.10)
     volume_component = min(float(entry.get("volume_ratio", 0.0)) / 100.0, 0.03)
@@ -1404,7 +1460,7 @@ def analyze_market(symbol: Optional[str] = None) -> Dict[str, Any]:
     hourly = timeframe_analysis(candles["1H"], "1H")
     thirtym = timeframe_analysis(candles["30M"], "30M")
     entry_signals = [
-        build_entry_timeframe_signal(entry_timeframe, weekly, daily, fourh, hourly, thirtym)
+        build_entry_timeframe_signal(entry_timeframe, weekly, daily, fourh, hourly, thirtym, selected)
         for entry_timeframe in ["30M", "1H", "4H", "1D"]
     ]
     actionable = [item for item in entry_signals if item.get("signal") in ["LONG", "SHORT"]]

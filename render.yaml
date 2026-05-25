@@ -76,6 +76,10 @@ services:
         value: "3.0"
       - key: REQUIRE_MTF_MACD_CONFIRM
         value: "true"
+      - key: AI_CONFIDENCE_BUFFER
+        value: "0.00"
+      - key: OPENAI_MIN_SECONDS_BETWEEN_CALLS
+        value: "1800"
       - key: MAX_ENTRY_EMA21_ATR_DISTANCE
         value: "2.5"
       - key: MAX_ENTRY_EMA50_ATR_DISTANCE
