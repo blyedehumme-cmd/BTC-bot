@@ -440,13 +440,41 @@ function SystemStatus({ aiStatus }: { aiStatus: AiStatus | null }) {
 }
 
 function StrategyMatrix({ checks, blockedReasons }: { checks: StrategyCheck[]; blockedReasons: string[] }) {
+  const [expanded, setExpanded] = useState(false);
   const pending = checks.some((check) => check.status === 'pending');
+  const okCount = checks.filter((check) => check.status === 'ok').length;
+  const blockCount = checks.filter((check) => check.status !== 'ok' && check.status !== 'pending').length;
+  const visibleChecks = expanded ? checks : checks.slice(0, 1);
+  const firstCheck = checks[0];
   return (
     <div className="premium-card p-5">
       <div className="panel-head"><h2>Matriz swing</h2><span>{blockedReasons.length ? 'WAIT' : pending ? 'pendiente' : 'alineado'}</span></div>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="mb-4 w-full rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 text-left transition hover:border-cyan-300/50 hover:bg-cyan-400/15"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Resumen de entrada</p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              {checks.length ? `${okCount}/${checks.length} confirmaciones OK` : 'Esperando matriz del bot'}
+            </p>
+            <p className="mt-1 text-sm text-slate-400">
+              {firstCheck ? `${firstCheck.label}: ${String(firstCheck.value ?? firstCheck.detail ?? '—')}` : 'Toca aquí cuando llegue el próximo análisis.'}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${blockCount ? 'bg-rose-400/15 text-rose-300' : pending ? 'bg-cyan-400/15 text-cyan-300' : 'bg-emerald-400/15 text-emerald-300'}`}>
+              {blockCount ? `${blockCount} bloquea` : pending ? 'pendiente' : 'alineado'}
+            </span>
+            <p className="mt-2 text-xs text-slate-500">{expanded ? 'Ocultar detalle' : 'Ver detalle'}</p>
+          </div>
+        </div>
+      </button>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {checks.length === 0 && <p className="text-sm text-slate-500">Esperando snapshot de estrategia del bot.</p>}
-        {checks.map((check, index) => {
+        {visibleChecks.map((check, index) => {
           const ok = check.status === 'ok';
           const isPending = check.status === 'pending';
           const tone = ok
@@ -466,7 +494,10 @@ function StrategyMatrix({ checks, blockedReasons }: { checks: StrategyCheck[]; b
           );
         })}
       </div>
-      {blockedReasons.length > 0 && (
+      {!expanded && checks.length > 1 && (
+        <p className="mt-3 text-xs text-slate-500">Hay {checks.length - 1} validaciones más ocultas. Toca el resumen para verlas.</p>
+      )}
+      {expanded && blockedReasons.length > 0 && (
         <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4">
           <p className="text-xs uppercase tracking-[0.18em] text-amber-300">Por qué no entra</p>
           <div className="mt-2 flex flex-wrap gap-2">
