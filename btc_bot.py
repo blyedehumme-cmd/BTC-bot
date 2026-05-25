@@ -180,6 +180,7 @@ logger = logging.getLogger("btc-bot")
 client: Optional[RESTClient] = None
 telegram_bot: Optional[Bot] = None
 ai_decision_cache: Dict[str, Dict[str, Any]] = {}
+last_positions_status_key = ""
 
 
 # =========================
@@ -1746,6 +1747,54 @@ async def send_open_position_to_backend(position: Dict[str, Any]) -> None:
     await post_json_to_backend("ai/decisions", payload)
 
 
+def open_positions_snapshot() -> Dict[str, Any]:
+    positions = []
+    for position in active_positions():
+        positions.append({
+            "status": "OPEN",
+            "symbol": position.get("symbol"),
+            "entry_timeframe": position.get("entry_timeframe"),
+            "side": position.get("side"),
+            "entry_price": position.get("entry_price"),
+            "position_size": position.get("position_size_btc"),
+            "position_usd": position.get("position_usd"),
+            "stop_loss": position.get("stop_loss"),
+            "take_profit": position.get("take_profit"),
+            "leverage": position.get("leverage"),
+            "confidence": position.get("last_confidence"),
+            "opened_at": datetime.utcfromtimestamp(float(position.get("last_trade_ts", time.time()))).isoformat() + "Z",
+            "reason": position.get("last_reason"),
+        })
+    return {
+        "open_positions": positions,
+        "open_position": positions[0] if positions else {"status": "NONE"},
+        "paper_balance": DRY_RUN_BALANCE + state.stats.simulated_pnl_usd,
+        "realized_pnl": state.stats.simulated_pnl_usd,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+async def send_positions_status_to_backend() -> None:
+    global last_positions_status_key
+    if not BACKEND_API_URL:
+        return
+    snapshot = open_positions_snapshot()
+    status_key = json.dumps(snapshot, sort_keys=True, default=str)
+    if status_key == last_positions_status_key:
+        return
+    last_positions_status_key = status_key
+    positions = snapshot.get("open_positions", [])
+    payload = {
+        "signal_id": 0,
+        "decision_type": "position_status",
+        "reason": f"Paper positions status: {len(positions)} open.",
+        "condition_snapshot": json.dumps(snapshot),
+        "explanation": "Estado actual de posiciones paper publicado por el worker.",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+    await post_json_to_backend("ai/decisions", payload)
+
+
 async def publish_analyses_to_backend(analyses: List[Dict[str, Any]]) -> None:
     if not BACKEND_API_URL:
         return
@@ -2141,6 +2190,7 @@ async def trading_loop(app: Optional[Application]) -> None:
         try:
             managed_analyses = await manage_existing_positions(app)
             open_symbols = open_position_symbols()
+            await send_positions_status_to_backend()
             scan_symbols = [symbol for symbol in WATCHLIST if symbol not in open_symbols]
             scan_analyses = [analyze_market(symbol) for symbol in scan_symbols] if len(open_symbols) < MAX_OPEN_POSITIONS else []
             analyses = managed_analyses + scan_analyses
