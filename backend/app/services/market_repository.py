@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import MarketSnapshot
 from app.schemas.schemas import MarketSnapshotCreate
+from app.utils.datetime import utc_naive
 
 
 async def get_market_snapshots(db: AsyncSession) -> Sequence[MarketSnapshot]:
@@ -21,7 +22,7 @@ async def create_market_snapshot(db: AsyncSession, payload: MarketSnapshotCreate
         support=payload.support,
         resistance=payload.resistance,
         volume=payload.volume,
-        updated_at=payload.updated_at,
+        updated_at=utc_naive(payload.updated_at),
     )
     db.add(snapshot)
     await db.commit()

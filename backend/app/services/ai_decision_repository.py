@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AiDecision
 from app.schemas.schemas import AiDecisionCreate
+from app.utils.datetime import utc_naive
 
 
 async def get_ai_decisions(db: AsyncSession, limit: int = 50) -> Sequence[AiDecision]:
@@ -22,7 +23,7 @@ async def create_ai_decision(db: AsyncSession, payload: AiDecisionCreate) -> AiD
         reason=payload.reason,
         condition_snapshot=payload.condition_snapshot,
         explanation=payload.explanation,
-        timestamp=payload.timestamp or datetime.utcnow(),
+        timestamp=utc_naive(payload.timestamp) or datetime.utcnow(),
     )
     db.add(decision)
     await db.commit()

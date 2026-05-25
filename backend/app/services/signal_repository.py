@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.models.models import Signal
 from app.schemas.schemas import SignalCreate
+from app.utils.datetime import utc_naive
 
 
 async def get_signals(db: AsyncSession) -> Sequence[Signal]:
@@ -23,7 +24,7 @@ async def create_signal(db: AsyncSession, payload: SignalCreate) -> Signal:
         market_condition=payload.market_condition,
         approved=payload.approved,
         explanation=payload.explanation,
-        created_at=payload.created_at or datetime.utcnow(),
+        created_at=utc_naive(payload.created_at) or datetime.utcnow(),
     )
     db.add(signal)
     await db.commit()

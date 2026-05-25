@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import PaperTrade
 from app.schemas.schemas import PaperTradeCreate
+from app.utils.datetime import utc_naive
 
 
 async def get_paper_trades(db: AsyncSession) -> Sequence[PaperTrade]:
@@ -23,8 +24,8 @@ async def create_paper_trade(db: AsyncSession, payload: PaperTradeCreate) -> Pap
         closed_price=payload.closed_price,
         result_pct=payload.result_pct,
         status=payload.status,
-        opened_at=payload.opened_at or datetime.utcnow(),
-        closed_at=payload.closed_at,
+        opened_at=utc_naive(payload.opened_at) or datetime.utcnow(),
+        closed_at=utc_naive(payload.closed_at),
         drawdown_pct=payload.drawdown_pct,
         notes=payload.notes,
     )
