@@ -157,7 +157,7 @@ class MarketSnapshotResponse(BaseModel):
     support: float
     resistance: float
     volume: float
-    updated_at: str
+    updated_at: datetime
 
     model_config = {
         'from_attributes': True,
