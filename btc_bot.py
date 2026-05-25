@@ -89,6 +89,7 @@ OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 ENABLE_HMM_FILTER = os.getenv("ENABLE_HMM_FILTER", "false").lower().strip() == "true"
 ALLOWED_HMM_REGIMES_RAW = os.getenv("ALLOWED_HMM_REGIMES", "").strip()
 HMM_REGIME_CONTEXT = os.getenv("HMM_REGIME_CONTEXT", "").strip()
+HMM_REGIME_CONTEXT_FILE = os.getenv("HMM_REGIME_CONTEXT_FILE", "").strip()
 
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "").strip().rstrip("/")
 if BACKEND_API_URL and not BACKEND_API_URL.endswith("/api"):
@@ -1502,13 +1503,31 @@ def choose_trade_analysis(analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
     return max(candidates, key=lambda item: float(item.get("opportunity_score", item.get("confidence", 0.0)))) if candidates else empty_analysis("Watchlist vacio.", 0.0)
 
 
-def attach_hmm_context(analysis: Dict[str, Any]) -> None:
+def load_hmm_regime_context() -> Dict[str, Any]:
+    if HMM_REGIME_CONTEXT_FILE:
+        try:
+            with open(HMM_REGIME_CONTEXT_FILE, "r", encoding="utf-8") as file:
+                loaded = json.load(file)
+            if isinstance(loaded, dict):
+                return loaded
+            logger.warning("invalid_hmm_context_file type=%s path=%s", type(loaded).__name__, HMM_REGIME_CONTEXT_FILE)
+        except FileNotFoundError:
+            logger.warning("hmm_context_file_missing path=%s", HMM_REGIME_CONTEXT_FILE)
+        except Exception as exc:
+            logger.warning("hmm_context_file_failed path=%s error=%s", HMM_REGIME_CONTEXT_FILE, exc)
     if not HMM_REGIME_CONTEXT:
-        return
+        return {}
     try:
-        context = json.loads(HMM_REGIME_CONTEXT)
+        loaded = json.loads(HMM_REGIME_CONTEXT)
+        return loaded if isinstance(loaded, dict) else {}
     except json.JSONDecodeError:
         logger.warning("invalid_hmm_regime_context value=%s", HMM_REGIME_CONTEXT[:120])
+        return {}
+
+
+def attach_hmm_context(analysis: Dict[str, Any]) -> None:
+    context = load_hmm_regime_context()
+    if not context:
         return
     symbol = str(analysis.get("symbol", WATCHLIST[0])).upper()
     raw = context.get(symbol, context) if isinstance(context, dict) else {}

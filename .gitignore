@@ -11,6 +11,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.mplconfig/
 
 # Editor directories and files
 .vscode/
@@ -26,6 +27,7 @@ price_trades.png
 pnl_distribution.png
 drawdown.png
 hmm_reports/
+hmm_context.json
 data/*.csv
 !data/.gitkeep
 
