@@ -570,14 +570,37 @@ export default function PremiumDashboard() {
   const cumulativePnlPct = performance?.equity_curve?.length
     ? performance.equity_curve[performance.equity_curve.length - 1].equity
     : recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
-  const paperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
+  const closedPaperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
   const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs), [aiLogs]);
   const openPosition = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
+  const openPositionSymbol = openPosition?.symbol;
+  const { data: openPositionLive } = usePolling<LiveMarket | null>(
+    useCallback(() => {
+      if (!openPositionSymbol || matchesCrypto(openPositionSymbol, selectedCrypto)) {
+        return Promise.resolve(live);
+      }
+      return fetchLiveMarket(timeframe, openPositionSymbol);
+    }, [live, openPositionSymbol, selectedCrypto, timeframe]),
+    3500,
+  );
+  const openPositionMarkPrice = openPosition
+    ? matchesCrypto(openPosition.symbol, selectedCrypto)
+      ? price
+      : openPositionLive?.price ?? 0
+    : 0;
   const openPositionNotional = openPosition?.position_usd ?? 0;
   const openPositionLeverage = openPosition?.leverage && openPosition.leverage > 0 ? openPosition.leverage : 1;
   const marginReserved = openPosition ? openPositionNotional / openPositionLeverage : 0;
+  const floatingPnl = openPosition?.entry_price && openPositionMarkPrice && openPosition?.position_size
+    ? String(openPosition.side).toUpperCase() === 'SHORT'
+      ? (openPosition.entry_price - openPositionMarkPrice) * openPosition.position_size
+      : (openPositionMarkPrice - openPosition.entry_price) * openPosition.position_size
+    : 0;
+  const floatingPnlPct = marginReserved ? (floatingPnl / marginReserved) * 100 : 0;
+  const paperEquity = closedPaperEquity + floatingPnl;
+  const totalPaperPnlPct = ((paperEquity / paperStartingBalance) - 1) * 100;
   const availablePaperBalance = Math.max(paperEquity - marginReserved, 0);
   const riskAtStop = openPosition?.entry_price && openPosition?.stop_loss && openPosition?.position_size
     ? Math.abs(openPosition.entry_price - openPosition.stop_loss) * openPosition.position_size
@@ -628,8 +651,8 @@ export default function PremiumDashboard() {
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <MetricCard label="Balance disponible" value={formatMoney(availablePaperBalance)} sub={openPosition ? `Reservado ${formatMoney(marginReserved)}` : 'sin margen reservado'} tone={availablePaperBalance >= paperStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(paperEquity)} />
-            <MetricCard label="Equity papel" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
-            <MetricCard label="P&L simulado" value={formatPct(cumulativePnlPct)} sub="trades cerrados" tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
+            <MetricCard label="Equity papel" value={formatMoney(paperEquity)} sub={formatPct(totalPaperPnlPct)} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
+            <MetricCard label="P&L papel" value={formatPct(totalPaperPnlPct)} sub={openPosition ? `Flotante ${formatMoney(floatingPnl)}` : 'solo trades cerrados'} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
             <div className="space-y-2">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
@@ -730,7 +753,9 @@ export default function PremiumDashboard() {
                     <div><span className="text-slate-500">Temporalidad</span><p className="font-semibold text-white">{openPosition.entry_timeframe ?? '—'}</p></div>
                     <div><span className="text-slate-500">Apalancamiento</span><p className="font-semibold text-cyan-300">{openPosition.leverage ? `${openPosition.leverage.toFixed(2)}x` : '—'}</p></div>
                     <div><span className="text-slate-500">Entrada</span><p className="font-semibold text-white">{formatMoney(openPosition.entry_price)}</p></div>
+                    <div><span className="text-slate-500">Precio actual</span><p className="font-semibold text-white">{formatMoney(openPositionMarkPrice)}</p></div>
                     <div><span className="text-slate-500">Contrato</span><p className="font-semibold text-white">{formatMoney(openPosition.position_usd)}</p></div>
+                    <div><span className="text-slate-500">PnL flotante</span><p className={`font-semibold ${floatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatMoney(floatingPnl)} · {formatPct(floatingPnlPct)}</p></div>
                     <div><span className="text-slate-500">Stop loss</span><p className="font-semibold text-rose-300">{formatMoney(openPosition.stop_loss)}</p></div>
                     <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(openPosition.take_profit)}</p></div>
                   </div>
@@ -747,6 +772,8 @@ export default function PremiumDashboard() {
                   ['Disponible', formatMoney(availablePaperBalance), 'text-emerald-300'],
                   ['Margen reservado', formatMoney(marginReserved), openPosition ? 'text-amber-300' : 'text-slate-500'],
                   ['Contrato abierto', formatMoney(openPositionNotional), openPosition ? 'text-cyan-300' : 'text-slate-500'],
+                  ['PnL flotante', `${formatMoney(floatingPnl)} · ${formatPct(floatingPnlPct)}`, floatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                  ['Precio posición', formatMoney(openPositionMarkPrice), openPosition ? 'text-white' : 'text-slate-500'],
                   ['Riesgo hasta SL', formatMoney(riskAtStop), openPosition ? 'text-rose-300' : 'text-slate-500'],
                   ['Posición', openPosition ? `${openPosition.symbol} ${openPosition.side}` : 'Sin posición abierta', openPosition?.side === 'SHORT' ? 'text-rose-300' : openPosition?.side === 'LONG' ? 'text-emerald-300' : 'text-slate-500'],
                 ].map(([label, value, className]) => (
