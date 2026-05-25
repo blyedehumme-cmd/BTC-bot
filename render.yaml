@@ -35,7 +35,7 @@ services:
       - key: DRY_RUN
         value: "true"
       - key: USE_AI_ASSIST
-        value: "false"
+        value: "true"
       - key: ENABLE_HMM_FILTER
         value: "false"
       - key: ALLOWED_HMM_REGIMES
@@ -66,6 +66,8 @@ services:
         value: "0.03"
       - key: MAX_POSITION_BALANCE_PCT
         value: "1.0"
+      - key: MAX_OPEN_POSITIONS
+        value: "1"
       - key: ADX_THRESHOLD
         value: "24"
       - key: VOLUME_HEALTH_MIN
