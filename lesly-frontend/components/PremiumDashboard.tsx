@@ -71,6 +71,21 @@ type DecisionSnapshot = {
   blocked_reasons?: string[];
   ai_called?: boolean;
   ai_rate_limited?: boolean;
+  open_position?: {
+    status?: string;
+    symbol?: string;
+    entry_timeframe?: string;
+    side?: string;
+    entry_price?: number;
+    position_size?: number;
+    position_usd?: number;
+    stop_loss?: number;
+    take_profit?: number;
+    leverage?: number;
+    confidence?: number;
+    opened_at?: string;
+    reason?: string;
+  };
 };
 
 function formatMoney(value?: number | null) {
@@ -522,6 +537,7 @@ export default function PremiumDashboard() {
   const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
+  const openPosition = decisionSnapshot?.open_position?.status === 'OPEN' ? decisionSnapshot.open_position : null;
   const liveCandles = useMemo(() => live?.candles?.map((candle) => ({
     time: candle.time,
     open: Number(candle.open),
@@ -660,6 +676,26 @@ export default function PremiumDashboard() {
                   <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(resistance)}</p></div>
                 </div>
               </div>
+              {openPosition && (
+                <div className={`mt-4 rounded-3xl border p-5 ${signalTone(openPosition.side)}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Operación live</p>
+                      <p className="mt-2 text-3xl font-black">{openPosition.symbol} {openPosition.side}</p>
+                    </div>
+                    <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-emerald-300">open</span>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+                    <div><span className="text-slate-500">Temporalidad</span><p className="font-semibold text-white">{openPosition.entry_timeframe ?? '—'}</p></div>
+                    <div><span className="text-slate-500">Apalancamiento</span><p className="font-semibold text-cyan-300">{openPosition.leverage ? `${openPosition.leverage.toFixed(2)}x` : '—'}</p></div>
+                    <div><span className="text-slate-500">Entrada</span><p className="font-semibold text-white">{formatMoney(openPosition.entry_price)}</p></div>
+                    <div><span className="text-slate-500">Contrato</span><p className="font-semibold text-white">{formatMoney(openPosition.position_usd)}</p></div>
+                    <div><span className="text-slate-500">Stop loss</span><p className="font-semibold text-rose-300">{formatMoney(openPosition.stop_loss)}</p></div>
+                    <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(openPosition.take_profit)}</p></div>
+                  </div>
+                  <p className="mt-4 text-xs text-slate-500">Abierta NY {formatNewYorkDateTime(openPosition.opened_at)}</p>
+                </div>
+              )}
             </div>
 
             <div className="premium-card p-5">

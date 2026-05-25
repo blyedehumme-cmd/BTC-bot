@@ -1656,6 +1656,37 @@ async def send_trade_to_backend(price: float, pnl: float) -> None:
     await post_json_to_backend("trades", build_trade_payload(price, pnl))
 
 
+async def send_open_position_to_backend(position: Dict[str, Any]) -> None:
+    if not BACKEND_API_URL:
+        return
+    snapshot = {
+        "open_position": {
+            "status": "OPEN",
+            "symbol": position.get("symbol"),
+            "entry_timeframe": position.get("entry_timeframe"),
+            "side": position.get("side"),
+            "entry_price": position.get("entry_price"),
+            "position_size": position.get("position_size_btc"),
+            "position_usd": position.get("position_usd"),
+            "stop_loss": position.get("stop_loss"),
+            "take_profit": position.get("take_profit"),
+            "leverage": position.get("leverage"),
+            "confidence": position.get("last_confidence"),
+            "opened_at": datetime.utcfromtimestamp(float(position.get("last_trade_ts", time.time()))).isoformat() + "Z",
+            "reason": position.get("last_reason"),
+        }
+    }
+    payload = {
+        "signal_id": 0,
+        "decision_type": "position_opened",
+        "reason": f"{position.get('symbol')} {position.get('side')} opened in paper trading.",
+        "condition_snapshot": json.dumps(snapshot),
+        "explanation": str(position.get("last_reason", "")),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+    await post_json_to_backend("ai/decisions", payload)
+
+
 async def publish_analyses_to_backend(analyses: List[Dict[str, Any]]) -> None:
     if not BACKEND_API_URL:
         return
@@ -2012,6 +2043,7 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
     state.last_trade_ts = opened_at
     set_state_from_position(position)
     save_state()
+    await send_open_position_to_backend(position)
     logger.info(
         "position_opened symbol=%s timeframe=%s side=%s price=%.2f usd=%.2f size=%.8f leverage=%.2fx adx=%.2f stop=%.2f take=%.2f open_positions=%s",
         symbol,
