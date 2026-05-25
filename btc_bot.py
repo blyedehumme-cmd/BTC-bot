@@ -91,6 +91,8 @@ ALLOWED_HMM_REGIMES_RAW = os.getenv("ALLOWED_HMM_REGIMES", "").strip()
 HMM_REGIME_CONTEXT = os.getenv("HMM_REGIME_CONTEXT", "").strip()
 
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "").strip().rstrip("/")
+if BACKEND_API_URL and not BACKEND_API_URL.endswith("/api"):
+    BACKEND_API_URL = f"{BACKEND_API_URL}/api"
 STATE_FILE = os.getenv("STATE_FILE", "bot_state.json")
 
 EMA_FAST = 21
