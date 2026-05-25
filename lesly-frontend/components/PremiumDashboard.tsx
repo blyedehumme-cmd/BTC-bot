@@ -104,17 +104,50 @@ function signalTone(signal?: string | null) {
 }
 
 function latest<T>(items?: T[] | null): T | null {
-  return items && items.length > 0 ? items[items.length - 1] : null;
+  return items && items.length > 0 ? items[0] : null;
 }
 
-function parseDecisionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
-  const source = (logs ?? []).find((log) => log.condition_snapshot);
-  if (!source?.condition_snapshot) return null;
-  try {
-    return JSON.parse(source.condition_snapshot) as DecisionSnapshot;
-  } catch {
-    return null;
+function matchesCrypto(symbol: string | undefined | null, crypto: string) {
+  if (!symbol) return false;
+  return symbol.toUpperCase().includes(crypto.toUpperCase());
+}
+
+function latestForCrypto<T extends { symbol?: string }>(items: T[] | undefined | null, crypto: string): T | null {
+  return (items ?? []).find((item) => matchesCrypto(item.symbol, crypto)) ?? null;
+}
+
+function snapshotMatchesCrypto(snapshot: DecisionSnapshot, crypto: string) {
+  return (
+    matchesCrypto(snapshot.open_position?.symbol, crypto)
+    || matchesCrypto((snapshot as DecisionSnapshot & { symbol?: string }).symbol, crypto)
+    || matchesCrypto((snapshot as DecisionSnapshot & { trade_symbol?: string }).trade_symbol, crypto)
+  );
+}
+
+function parseDecisionSnapshot(logs?: AiLog[] | null, crypto?: string): DecisionSnapshot | null {
+  for (const log of logs ?? []) {
+    if (!log.condition_snapshot) continue;
+    try {
+      const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
+      if (!crypto || snapshotMatchesCrypto(snapshot, crypto)) return snapshot;
+    } catch {
+      continue;
+    }
   }
+  return null;
+}
+
+function parseOpenPositionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
+  for (const log of logs ?? []) {
+    if (!log.condition_snapshot) continue;
+    try {
+      const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
+      if (snapshot.open_position?.status === 'OPEN') return snapshot;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function fallbackStrategyChecks(params: { live: LiveMarket | null; snapshot: MarketSnapshot | null; signal: string; confidence: number }): StrategyCheck[] {
@@ -451,7 +484,7 @@ function EquityPanel({ performance }: { performance: Performance | null }) {
   const monthly = performance?.monthly_stats ?? [];
   return (
     <div className="premium-card p-5">
-      <div className="panel-head"><h2>Equity curve</h2><span>{curve.length} cierres</span></div>
+      <div className="panel-head"><h2>Curva de equity</h2><span>{curve.length} cierres</span></div>
       <div className="h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
         {values.length > 1 ? (
           <MiniSparkline values={values} tone={(values.at(-1) ?? 0) >= 0 ? 'green' : 'red'} />
@@ -465,7 +498,7 @@ function EquityPanel({ performance }: { performance: Performance | null }) {
         )}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Profit factor proxy</p><p className="mt-2 text-xl font-semibold text-cyan-200">{performance?.wins && performance?.losses ? (performance.wins / Math.max(performance.losses, 1)).toFixed(2) : '—'}</p></div>
+        <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Relación wins/losses</p><p className="mt-2 text-xl font-semibold text-cyan-200">{performance?.wins && performance?.losses ? (performance.wins / Math.max(performance.losses, 1)).toFixed(2) : '—'}</p></div>
         <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Drawdown</p><p className="mt-2 text-xl font-semibold text-rose-300">{performance?.max_drawdown ?? 0}%</p></div>
         <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="panel-label">Promedio</p><p className="mt-2 text-xl font-semibold text-emerald-300">{performance?.average_return ?? 0}%</p></div>
       </div>
@@ -519,25 +552,29 @@ export default function PremiumDashboard() {
     }
   }, []);
 
-  const snapshot = latest(snapshots);
-  const activeSignal = latest(signals);
-  const recentTrades = (trades ?? []).slice(-5).reverse();
-  const closedSignals = (signals ?? []).filter((signal) => signal.direction !== activeSignal?.direction || signal.id !== activeSignal?.id).slice(-4).reverse();
+  const snapshot = latestForCrypto(snapshots, selectedCrypto) ?? latest(snapshots);
+  const activeSignal = latestForCrypto(signals, selectedCrypto) ?? latest(signals);
+  const recentTrades = (trades ?? []).slice(0, 5);
+  const signalHistory = (signals ?? [])
+    .filter((item) => matchesCrypto(item.symbol, selectedCrypto))
+    .filter((item) => item.id !== activeSignal?.id)
+    .slice(0, 4);
   const price = live?.price ?? snapshot?.price ?? 0;
   const selectedMarket = cryptoMarkets.find((market) => market.symbol === selectedCrypto) ?? cryptoMarkets[0];
   const support = live?.support ?? snapshot?.support ?? undefined;
   const resistance = live?.resistance ?? snapshot?.resistance ?? undefined;
-  const signal = activeSignal?.direction ?? live?.signal ?? 'WAIT';
-  const confidence = activeSignal?.confidence_score ?? live?.confidence ?? aiStatus?.confidence ?? 0;
+  const signal = live?.signal ?? activeSignal?.direction ?? 'WAIT';
+  const confidence = live?.confidence ?? activeSignal?.confidence_score ?? aiStatus?.confidence ?? 0;
+  const hasTradeSignal = ['LONG', 'SHORT'].includes(String(signal).toUpperCase());
   const risk = activeSignal?.risk_level ?? aiStatus?.risk_level ?? 'Unknown';
   const cumulativePnlPct = performance?.equity_curve?.length
     ? performance.equity_curve[performance.equity_curve.length - 1].equity
     : recentTrades.reduce((sum, trade) => sum + (trade.result_pct ?? 0), 0);
   const paperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
-  const spark = useMemo(() => makeCandles(price || 100, support, resistance).map((candle) => candle.close), [price, support, resistance]);
   const botActive = botControl?.active ?? true;
-  const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs), [aiLogs]);
-  const openPosition = decisionSnapshot?.open_position?.status === 'OPEN' ? decisionSnapshot.open_position : null;
+  const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
+  const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs), [aiLogs]);
+  const openPosition = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
   const liveCandles = useMemo(() => live?.candles?.map((candle) => ({
     time: candle.time,
     open: Number(candle.open),
@@ -556,10 +593,7 @@ export default function PremiumDashboard() {
   const hasStrategySnapshot = Boolean(decisionSnapshot?.strategy_checks?.length);
   const strategyChecks = hasStrategySnapshot ? decisionSnapshot?.strategy_checks ?? [] : fallbackStrategyChecks({ live: live ?? null, snapshot, signal, confidence });
   const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
-  const latestLog = aiLogs?.[0] ?? null;
   const signalExplanation = activeSignal?.explanation
-    || latestLog?.detail
-    || latestLog?.message
     || (blockedReasons.length ? `WAIT: ${blockedReasons.slice(0, 3).join(', ')}` : 'Esperando el próximo análisis del bot.');
 
   return (
@@ -670,10 +704,10 @@ export default function PremiumDashboard() {
                 <p className="text-5xl font-black tracking-tight">{signal}</p>
                 <p className="mt-4 text-sm text-slate-300">{signalExplanation}</p>
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                  <div><span className="text-slate-500">Entrada</span><p className="font-semibold text-white">{formatMoney(price)}</p></div>
+                  <div><span className="text-slate-500">{hasTradeSignal ? 'Entrada estimada' : 'Precio actual'}</span><p className="font-semibold text-white">{formatMoney(price)}</p></div>
                   <div><span className="text-slate-500">Confianza</span><p className="font-semibold text-emerald-300">{confidence}%</p></div>
-                  <div><span className="text-slate-500">Stop loss</span><p className="font-semibold text-rose-300">{formatMoney(support)}</p></div>
-                  <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(resistance)}</p></div>
+                  <div><span className="text-slate-500">{hasTradeSignal ? 'Referencia soporte' : 'Soporte'}</span><p className="font-semibold text-cyan-300">{formatMoney(support)}</p></div>
+                  <div><span className="text-slate-500">{hasTradeSignal ? 'Referencia resistencia' : 'Resistencia'}</span><p className="font-semibold text-rose-300">{formatMoney(resistance)}</p></div>
                 </div>
               </div>
               {openPosition && (
@@ -699,7 +733,7 @@ export default function PremiumDashboard() {
             </div>
 
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Backtesting</h2><span>paper stats</span></div>
+              <div className="panel-head"><h2>Paper trading</h2><span>stats reales</span></div>
               <div className="grid gap-3 sm:grid-cols-3">
                 {[
                   ['Win rate', `${performance?.win_rate ?? 0}%`, 'text-emerald-300'],
@@ -725,10 +759,10 @@ export default function PremiumDashboard() {
             </div>
 
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Últimas señales cerradas</h2><span>{closedSignals.length}</span></div>
+              <div className="panel-head"><h2>Historial de señales</h2><span>{signalHistory.length}</span></div>
               <div className="space-y-3">
-                {closedSignals.length === 0 && <p className="text-sm text-slate-500">Sin señales cerradas todavía.</p>}
-                {closedSignals.map((item) => <div key={item.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className={item.direction === 'SHORT' ? 'text-rose-300' : item.direction === 'LONG' ? 'text-emerald-300' : 'text-cyan-300'}>{item.direction}</span><span className="text-slate-400">{item.confidence_score}%</span><span className="text-slate-500">{formatNewYorkDateTime(item.created_at)}</span></div>)}
+                {signalHistory.length === 0 && <p className="text-sm text-slate-500">Sin señales históricas para {selectedCrypto} todavía.</p>}
+                {signalHistory.map((item) => <div key={item.id} className="flex items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-3 text-sm"><span className={item.direction === 'SHORT' ? 'text-rose-300' : item.direction === 'LONG' ? 'text-emerald-300' : 'text-cyan-300'}>{item.direction}</span><span className="text-slate-400">{item.confidence_score}%</span><span className="text-slate-500">{formatNewYorkDateTime(item.created_at)}</span></div>)}
               </div>
             </div>
           </section>
