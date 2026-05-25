@@ -575,6 +575,13 @@ export default function PremiumDashboard() {
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
   const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs), [aiLogs]);
   const openPosition = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
+  const openPositionNotional = openPosition?.position_usd ?? 0;
+  const openPositionLeverage = openPosition?.leverage && openPosition.leverage > 0 ? openPosition.leverage : 1;
+  const marginReserved = openPosition ? openPositionNotional / openPositionLeverage : 0;
+  const availablePaperBalance = Math.max(paperEquity - marginReserved, 0);
+  const riskAtStop = openPosition?.entry_price && openPosition?.stop_loss && openPosition?.position_size
+    ? Math.abs(openPosition.entry_price - openPosition.stop_loss) * openPosition.position_size
+    : 0;
   const liveCandles = useMemo(() => live?.candles?.map((candle) => ({
     time: candle.time,
     open: Number(candle.open),
@@ -620,8 +627,8 @@ export default function PremiumDashboard() {
           </header>
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Balance total (papel)" value={formatMoney(paperStartingBalance)} sub="capital inicial" tone="green" indicatorLabel="Modo" indicatorValue="DRY RUN" />
-            <MetricCard label="Equity" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
+            <MetricCard label="Balance disponible" value={formatMoney(availablePaperBalance)} sub={openPosition ? `Reservado ${formatMoney(marginReserved)}` : 'sin margen reservado'} tone={availablePaperBalance >= paperStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(paperEquity)} />
+            <MetricCard label="Equity papel" value={formatMoney(paperEquity)} sub={formatPct(cumulativePnlPct)} tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
             <MetricCard label="P&L simulado" value={formatPct(cumulativePnlPct)} sub="trades cerrados" tone={cumulativePnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
             <div className="space-y-2">
@@ -734,6 +741,21 @@ export default function PremiumDashboard() {
 
             <div className="premium-card p-5">
               <div className="panel-head"><h2>Paper trading</h2><span>stats reales</span></div>
+              <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {[
+                  ['Capital papel', formatMoney(paperEquity), 'text-white'],
+                  ['Disponible', formatMoney(availablePaperBalance), 'text-emerald-300'],
+                  ['Margen reservado', formatMoney(marginReserved), openPosition ? 'text-amber-300' : 'text-slate-500'],
+                  ['Contrato abierto', formatMoney(openPositionNotional), openPosition ? 'text-cyan-300' : 'text-slate-500'],
+                  ['Riesgo hasta SL', formatMoney(riskAtStop), openPosition ? 'text-rose-300' : 'text-slate-500'],
+                  ['Posición', openPosition ? `${openPosition.symbol} ${openPosition.side}` : 'Sin posición abierta', openPosition?.side === 'SHORT' ? 'text-rose-300' : openPosition?.side === 'LONG' ? 'text-emerald-300' : 'text-slate-500'],
+                ].map(([label, value, className]) => (
+                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                    <p className={`mt-2 text-xl font-semibold ${className}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 {[
                   ['Win rate', `${performance?.win_rate ?? 0}%`, 'text-emerald-300'],
