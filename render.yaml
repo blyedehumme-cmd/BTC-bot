@@ -91,7 +91,7 @@ services:
       - key: KRAKEN_QUOTE_ASSET
         value: ZUSD
       - key: BACKEND_API_URL
-        sync: false
+        value: https://lesly-backend.onrender.com/api
       - key: CB_API_KEY
         sync: false
       - key: CB_API_SECRET
