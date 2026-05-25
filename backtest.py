@@ -37,7 +37,7 @@ DYNAMIC_LEVERAGE_STRONG_ADX = float(os.getenv("BACKTEST_DYNAMIC_LEVERAGE_STRONG_
 KRAKEN_FEE_RATE = float(os.getenv("BACKTEST_FEE_RATE", "0.0026"))
 ATR_STOP_MULTIPLIER = float(os.getenv("BACKTEST_ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
-ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "1.5"))
+ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "2.0"))
 REQUIRE_MTF_MACD_CONFIRM = os.getenv("BACKTEST_REQUIRE_MTF_MACD_CONFIRM", "false").lower().strip() == "true"
 MAX_ENTRY_EMA21_ATR_DISTANCE = float(os.getenv("BACKTEST_MAX_ENTRY_EMA21_ATR_DISTANCE", "2.5"))
 MAX_ENTRY_EMA50_ATR_DISTANCE = float(os.getenv("BACKTEST_MAX_ENTRY_EMA50_ATR_DISTANCE", "4.0"))
@@ -49,7 +49,7 @@ if BACKTEST_PROFILE == "improved":
     VOLUME_HEALTH_MIN = float(os.getenv("BACKTEST_VOLUME_HEALTH_MIN", "0.75"))
     MIN_MINUTES_BETWEEN_TRADES = int(os.getenv("BACKTEST_MIN_MINUTES_BETWEEN_TRADES", "360"))
     MAX_TRADES_PER_DAY = int(os.getenv("BACKTEST_MAX_TRADES_PER_DAY", "1"))
-    ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "3.0"))
+    ATR_TRAILING_MULTIPLIER = float(os.getenv("BACKTEST_ATR_TRAILING_MULTIPLIER", "2.0"))
     REQUIRE_MTF_MACD_CONFIRM = os.getenv("BACKTEST_REQUIRE_MTF_MACD_CONFIRM", "true").lower().strip() == "true"
 EMA_SLOW = 100
 MACD_SIGNAL = 10
@@ -218,7 +218,6 @@ def build_signal_from_analyses(weekly: dict[str, Any], daily: dict[str, Any], fo
     short_not_extended = price >= ema21_value or distance_atr <= MAX_ENTRY_EMA21_ATR_DISTANCE
     long_not_late_ema50 = price <= ema50_value or distance_ema50_atr <= MAX_ENTRY_EMA50_ATR_DISTANCE
     short_not_late_ema50 = price >= ema50_value or distance_ema50_atr <= MAX_ENTRY_EMA50_ATR_DISTANCE
-
     long_checks = {
         "1D bullish": daily["trend"] == "bull",
         "4H bullish": fourh["trend"] == "bull",

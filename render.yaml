@@ -75,7 +75,7 @@ services:
       - key: VOLUME_HEALTH_MIN
         value: "0.60"
       - key: ATR_TRAILING_MULTIPLIER
-        value: "3.0"
+        value: "2.0"
       - key: REQUIRE_MTF_MACD_CONFIRM
         value: "true"
       - key: AI_CONFIDENCE_BUFFER

@@ -80,7 +80,7 @@ MIN_ORDER_USD = float(os.getenv("MIN_ORDER_USD", "10"))
 DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
-ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "3.0"))
+ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "2.0"))
 
 USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "false").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
