@@ -67,10 +67,27 @@ type DecisionSnapshot = {
   volume_ratio?: number;
   atr?: number;
   volatility_ratio?: number;
+  hmm_regime?: number | string | null;
+  hmm_regime_label?: string | null;
+  hmm_source?: string | null;
   strategy_checks?: StrategyCheck[];
   blocked_reasons?: string[];
   ai_called?: boolean;
   ai_rate_limited?: boolean;
+  supervisor_decision?: {
+    approved?: boolean;
+    action?: string;
+    reason?: string;
+    agents?: Array<{
+      name?: string;
+      status?: string;
+      reason?: string;
+      data?: {
+        regime?: number | string | null;
+        label?: string | null;
+      };
+    }>;
+  };
   open_position?: {
     status?: string;
     symbol?: string;
@@ -158,6 +175,30 @@ function parseOpenPositionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | nu
     }
   }
   return null;
+}
+
+function hmmContext(snapshot: DecisionSnapshot | null) {
+  const hmmAgent = snapshot?.supervisor_decision?.agents?.find((agent) => agent.name === 'hmm');
+  const regime = snapshot?.hmm_regime ?? hmmAgent?.data?.regime;
+  const label = snapshot?.hmm_regime_label ?? hmmAgent?.data?.label;
+  const status = hmmAgent?.status;
+  const reason = hmmAgent?.reason;
+
+  if (regime === undefined || regime === null) {
+    return {
+      regime: 'Sin régimen',
+      label: 'Contexto HMM no recibido',
+      status: status ?? 'context',
+      reason: reason ?? 'HMM está como contexto, no como filtro automático.',
+    };
+  }
+
+  return {
+    regime: `Régimen ${regime}`,
+    label: label || 'Régimen estadístico',
+    status: status ?? 'context',
+    reason: reason ?? 'HMM disponible como contexto; no bloquea operaciones.',
+  };
 }
 
 function fallbackStrategyChecks(params: { live: LiveMarket | null; snapshot: MarketSnapshot | null; signal: string; confidence: number }): StrategyCheck[] {
@@ -710,6 +751,7 @@ export default function PremiumDashboard() {
   const hasStrategySnapshot = Boolean(decisionSnapshot?.strategy_checks?.length);
   const strategyChecks = hasStrategySnapshot ? decisionSnapshot?.strategy_checks ?? [] : fallbackStrategyChecks({ live: live ?? null, snapshot, signal, confidence });
   const blockedReasons = decisionSnapshot?.blocked_reasons ?? [];
+  const hmmInfo = hmmContext(decisionSnapshot);
   const signalExplanation = activeSignal?.explanation
     || (blockedReasons.length ? `WAIT: ${blockedReasons.slice(0, 3).join(', ')}` : 'Esperando el próximo análisis del bot.');
 
@@ -940,6 +982,8 @@ export default function PremiumDashboard() {
                   ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral'],
                   ['Temporalidad dominante', timeframe],
                   ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
+                  ['Régimen HMM', `${hmmInfo.regime} · ${hmmInfo.status}`],
+                  ['Contexto HMM', hmmInfo.label],
                   ['Validación IA', aiStatus?.mode ?? 'paper'],
                   ['Último análisis', formatNewYorkDateTime(aiStatus?.last_analysis_time)],
                 ].map(([label, value]) => (
