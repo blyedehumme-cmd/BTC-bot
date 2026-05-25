@@ -1963,7 +1963,9 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
                 f"Size: {state.position_size_btc:.8f}",
             )
         else:
-            kept_positions.append(sync_position_from_state(position))
+            synced_position = sync_position_from_state(position)
+            kept_positions.append(synced_position)
+            await send_open_position_to_backend(synced_position)
     state.positions = kept_positions
     sync_primary_position()
     save_state()
