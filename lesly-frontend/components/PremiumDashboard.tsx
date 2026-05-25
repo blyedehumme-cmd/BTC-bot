@@ -547,6 +547,51 @@ function EquityPanel({ performance }: { performance: Performance | null }) {
   );
 }
 
+function BackendEventsPanel({ aiLogs }: { aiLogs?: AiLog[] | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const logs = aiLogs ?? [];
+  const latestLog = logs[0];
+  const visibleLogs = expanded ? logs.slice(0, 8) : logs.slice(0, 1);
+
+  return (
+    <div className="premium-card p-5">
+      <div className="panel-head"><h2>Eventos del backend</h2><span>{logs.length} logs</span></div>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="mb-4 w-full rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 text-left transition hover:border-cyan-300/50 hover:bg-cyan-400/15"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Último evento</p>
+            <p className="mt-2 line-clamp-2 text-sm font-semibold text-white">
+              {latestLog?.message ?? 'Esperando eventos del backend y decisiones del bot.'}
+            </p>
+            {latestLog && <p className="mt-1 text-xs text-slate-500">{formatNewYorkTime(latestLog.timestamp ?? latestLog.time)} · {latestLog.severity ?? 'BACKEND'}</p>}
+          </div>
+          <div className="shrink-0 text-right">
+            <span className="rounded-full bg-cyan-400/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-300">
+              {expanded ? 'ocultar' : 'ver logs'}
+            </span>
+          </div>
+        </div>
+      </button>
+      <div className="space-y-3">
+        {visibleLogs.map((log, index) => (
+          <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble">
+            <p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'BACKEND'}</p>
+            <p className="mt-1 line-clamp-3 text-sm text-slate-200">{log.message}</p>
+            {expanded && log.detail && <p className="mt-1 line-clamp-6 text-xs text-slate-500">{log.detail}</p>}
+            {log.condition_snapshot && <p className="mt-2 inline-flex rounded-full border border-cyan-400/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-cyan-300">Snapshot estrategia recibido</p>}
+          </div>
+        ))}
+        {logs.length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando eventos del backend y decisiones del bot.</p></div>}
+        {!expanded && logs.length > 1 && <p className="text-xs text-slate-500">Hay {logs.length - 1} eventos más ocultos. Toca el resumen para verlos.</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function PremiumDashboard() {
   const [timeframe, setTimeframe] = useState('1H');
   const [selectedCrypto, setSelectedCrypto] = useState('BTC');
@@ -889,20 +934,7 @@ export default function PremiumDashboard() {
                 ))}
               </div>
             </div>
-            <div className="premium-card p-5">
-              <div className="panel-head"><h2>Eventos del backend</h2><span>{(aiLogs ?? []).length} logs</span></div>
-              <div className="space-y-3">
-                {(aiLogs ?? []).slice(0, 6).map((log, index) => (
-                  <div key={`${log.timestamp ?? log.time}-${index}`} className="ai-bubble">
-                    <p className="text-xs text-cyan-300">{formatNewYorkTime(log.timestamp ?? log.time)} · {log.severity ?? 'BACKEND'}</p>
-                    <p className="mt-1 text-sm text-slate-200">{log.message}</p>
-                    {log.detail && <p className="mt-1 text-xs text-slate-500">{log.detail}</p>}
-                    {log.condition_snapshot && <p className="mt-2 inline-flex rounded-full border border-cyan-400/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-cyan-300">Snapshot estrategia recibido</p>}
-                  </div>
-                ))}
-                {(aiLogs ?? []).length === 0 && <div className="ai-bubble"><p className="text-sm text-slate-300">Esperando eventos del backend y decisiones del bot.</p></div>}
-              </div>
-            </div>
+            <BackendEventsPanel aiLogs={aiLogs} />
             <div className="premium-card p-5">
               <div className="panel-head"><h2>Últimas operaciones</h2><span>{recentTrades.length}</span></div>
               <div className="space-y-3">
