@@ -42,6 +42,7 @@ from supervisor.supervisor import evaluate_supervisor
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
 TELEGRAM_POLLING_ENABLED = os.getenv("TELEGRAM_POLLING_ENABLED", "false").lower().strip() == "true"
+TELEGRAM_COMMANDS_ENABLED = os.getenv("TELEGRAM_COMMANDS_ENABLED", "false").lower().strip() == "true"
 CB_API_KEY = os.getenv("CB_API_KEY", "").strip()
 CB_API_SECRET = os.getenv("CB_API_SECRET", "").strip().replace("\\n", "\n")
 EXCHANGE = os.getenv("EXCHANGE", "kraken").strip().lower()
@@ -2168,8 +2169,10 @@ def validate_config() -> None:
         logger.warning("CHAT_ID no configurado; Telegram deshabilitado.")
     if CHAT_ID and not TELEGRAM_TOKEN:
         logger.warning("TELEGRAM_TOKEN no configurado; Telegram deshabilitado.")
-    if TELEGRAM_TOKEN and CHAT_ID and not TELEGRAM_POLLING_ENABLED:
+    if TELEGRAM_TOKEN and CHAT_ID and not (TELEGRAM_POLLING_ENABLED and TELEGRAM_COMMANDS_ENABLED):
         logger.info("telegram_polling disabled=true notifications_enabled=true")
+    if TELEGRAM_POLLING_ENABLED and not TELEGRAM_COMMANDS_ENABLED:
+        logger.warning("telegram_polling_requested ignored=true reason=TELEGRAM_COMMANDS_ENABLED_false")
     if not BACKEND_API_URL:
         logger.info("backend_client disabled=true")
 
@@ -2180,7 +2183,7 @@ def main() -> None:
     if not DRY_RUN and EXCHANGE == "coinbase":
         get_client()
 
-    use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID and TELEGRAM_POLLING_ENABLED)
+    use_telegram = bool(TELEGRAM_TOKEN and CHAT_ID and TELEGRAM_POLLING_ENABLED and TELEGRAM_COMMANDS_ENABLED)
     app: Optional[Application] = None
     if use_telegram:
         app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
