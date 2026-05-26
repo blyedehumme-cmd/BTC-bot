@@ -31,6 +31,8 @@ from app.services.auth_service import (
 
 router = APIRouter()
 
+SUPPORTED_USER_EXCHANGES = {'kraken', 'coinbase', 'binance', 'okx'}
+
 
 def user_response(user: User) -> UserResponse:
     return UserResponse.model_validate(user)
@@ -118,7 +120,7 @@ async def upsert_exchange_account(
     db: AsyncSession = Depends(get_db),
 ):
     exchange = payload.exchange.strip().lower()
-    if exchange not in {'kraken', 'coinbase'}:
+    if exchange not in SUPPORTED_USER_EXCHANGES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Exchange no soportado.')
     label = payload.account_label.strip().lower() or 'main'
     now = datetime.utcnow()

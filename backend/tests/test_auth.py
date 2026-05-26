@@ -39,6 +39,33 @@ async def test_register_login_and_exchange_account(client):
     assert accounts.status_code == 200
     assert len(accounts.json()) == 1
 
+    okx_account = await client.post(
+        '/api/auth/exchange-accounts',
+        headers={'Authorization': f'Bearer {token}'},
+        json={
+            'exchange': 'okx',
+            'api_key': 'OKX123456789',
+            'api_secret': 'SECRET123',
+            'passphrase': 'required-on-okx',
+            'dry_run': True,
+        },
+    )
+    assert okx_account.status_code == 200
+    assert okx_account.json()['exchange'] == 'okx'
+
+    binance_account = await client.post(
+        '/api/auth/exchange-accounts',
+        headers={'Authorization': f'Bearer {token}'},
+        json={
+            'exchange': 'binance',
+            'api_key': 'BINANCE123456789',
+            'api_secret': 'SECRET123',
+            'dry_run': True,
+        },
+    )
+    assert binance_account.status_code == 200
+    assert binance_account.json()['exchange'] == 'binance'
+
     login = await client.post('/api/auth/login', json={
         'email': email,
         'password': 'super-secret-123',

@@ -152,6 +152,8 @@ export default function AuthGate({ children }: Props) {
             <select className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="exchange" defaultValue="kraken">
               <option value="kraken">Kraken</option>
               <option value="coinbase">Coinbase</option>
+              <option value="binance">Binance</option>
+              <option value="okx">OKX</option>
             </select>
             <input className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="api_key" placeholder="API key" required />
             <input className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="api_secret" placeholder="API secret" required />
