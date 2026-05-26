@@ -1,0 +1,26 @@
+{
+  "BTC": {
+    "regime": 0,
+    "label": "Regimen 0 - lateral/mixto",
+    "source": "hmm_live_context",
+    "primary_timeframe": "4H",
+    "context_timeframe": "1D",
+    "states": 5,
+    "bic": 34579.86449378811,
+    "as_of": "2026-05-21 16:00:00+00:00",
+    "generated_at": "2026-05-25T11:55:05.150504+00:00",
+    "warning": "HMM es contexto historico/in-sample. No es una senal principal y no garantiza resultados futuros."
+  },
+  "ETH": {
+    "regime": 0,
+    "label": "Regimen 0 - lateral/mixto",
+    "source": "hmm_live_context",
+    "primary_timeframe": "4H",
+    "context_timeframe": "1D",
+    "states": 5,
+    "bic": 111053.26140765593,
+    "as_of": "2026-05-21 20:00:00+00:00",
+    "generated_at": "2026-05-26T02:11:25.404357+00:00",
+    "warning": "HMM es contexto historico/in-sample. No es una senal principal y no garantiza resultados futuros."
+  }
+}

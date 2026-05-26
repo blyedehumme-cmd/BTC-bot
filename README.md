@@ -19,6 +19,8 @@ Por esa razón, el `WATCHLIST` de Render queda en `BTC,ETH`. Las demás criptomo
 
 El paper trading usa una sola cuenta simulada de `$5,000`. Si BTC y ETH tienen operaciones abiertas al mismo tiempo, ambas comparten ese mismo capital: el margen reservado se descuenta del disponible y el frontend muestra equity, margen, contrato abierto y PnL flotante consolidados.
 
+El contexto HMM de produccion queda en `hmm_context.json` con BTC y ETH. En Render se usa `HMM_REGIME_CONTEXT_FILE=hmm_context.json`; el filtro automatico HMM sigue desactivado por defecto, asi que HMM aporta contexto al Supervisor/IA sin bloquear operaciones por si solo.
+
 ## Características principales
 
 - Multi-timeframe: 1W, 1D, 4H, 1H

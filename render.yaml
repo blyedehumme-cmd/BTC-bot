@@ -43,7 +43,7 @@ services:
       - key: HMM_REGIME_CONTEXT
         value: ""
       - key: HMM_REGIME_CONTEXT_FILE
-        value: ""
+        value: hmm_context.json
       - key: STRATEGY_PROFILE
         value: btc_swing_v1
       - key: OPTIMIZED_SYMBOLS
