@@ -693,6 +693,7 @@ export default function PremiumDashboard() {
   const [closeActionBusy, setCloseActionBusy] = useState(false);
   const [closeActionMessage, setCloseActionMessage] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [paperPanelOpen, setPaperPanelOpen] = useState(false);
   const liveNow = useLiveClock();
   const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe, selectedCrypto), [timeframe, selectedCrypto]), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
@@ -974,48 +975,79 @@ export default function PremiumDashboard() {
             </div>
 
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Paper trading</h2><span>stats reales</span></div>
-              <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {[
-                  ['Capital papel', formatMoney(accountClosedBalance), 'text-white'],
-                  ['Equity actual', formatMoney(accountPaperEquity), totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
-                  ['Disponible', formatMoney(accountAvailableBalance), 'text-emerald-300'],
-                  ['Margen reservado', formatMoney(accountMarginReserved), allOpenPositions.length ? 'text-amber-300' : 'text-slate-500'],
-                  ['Contrato abierto', formatMoney(accountOpenNotional), allOpenPositions.length ? 'text-cyan-300' : 'text-slate-500'],
-                  ['PnL flotante', `${formatMoney(accountFloatingPnl)} · ${formatPct(totalPaperPnlPct)}`, accountFloatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'],
-                  ['PnL realizado', formatPct(realizedPaperPnlPct), realizedPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
-                  ['Precio posición', formatMoney(openPositionMarkPrice), openPosition ? 'text-white' : 'text-slate-500'],
-                  ['Riesgo hasta SL', formatMoney(riskAtStop), openPosition ? 'text-rose-300' : 'text-slate-500'],
-                  ['Posición', openPosition ? `${openPosition.symbol} ${openPosition.side}` : 'Sin posición abierta', openPosition?.side === 'SHORT' ? 'text-rose-300' : openPosition?.side === 'LONG' ? 'text-emerald-300' : 'text-slate-500'],
-                ].map(([label, value, className]) => (
-                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-                    <p className={`mt-2 text-xl font-semibold ${className}`}>{value}</p>
+              <div className="panel-head">
+                <h2>Paper trading</h2>
+                <button
+                  type="button"
+                  onClick={() => setPaperPanelOpen((value) => !value)}
+                  className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-200 transition hover:border-cyan-200 hover:bg-cyan-300/20"
+                >
+                  {paperPanelOpen ? 'ocultar' : 'ver stats'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaperPanelOpen((value) => !value)}
+                className="mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5 sm:grid-cols-3"
+              >
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Equity</span>
+                  <span className={`mt-1 block text-xl font-semibold ${totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatMoney(accountPaperEquity)}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Disponible</span>
+                  <span className="mt-1 block text-xl font-semibold text-emerald-300">{formatMoney(accountAvailableBalance)}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">P&L papel</span>
+                  <span className={`mt-1 block text-xl font-semibold ${totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatPct(totalPaperPnlPct)}</span>
+                </span>
+              </button>
+              {paperPanelOpen && (
+                <div className="mt-5 space-y-5">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {[
+                      ['Capital papel', formatMoney(accountClosedBalance), 'text-white'],
+                      ['Equity actual', formatMoney(accountPaperEquity), totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                      ['Disponible', formatMoney(accountAvailableBalance), 'text-emerald-300'],
+                      ['Margen reservado', formatMoney(accountMarginReserved), allOpenPositions.length ? 'text-amber-300' : 'text-slate-500'],
+                      ['Contrato abierto', formatMoney(accountOpenNotional), allOpenPositions.length ? 'text-cyan-300' : 'text-slate-500'],
+                      ['PnL flotante', `${formatMoney(accountFloatingPnl)} · ${formatPct(totalPaperPnlPct)}`, accountFloatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                      ['PnL realizado', formatPct(realizedPaperPnlPct), realizedPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                      ['Precio posición', formatMoney(openPositionMarkPrice), openPosition ? 'text-white' : 'text-slate-500'],
+                      ['Riesgo hasta SL', formatMoney(riskAtStop), openPosition ? 'text-rose-300' : 'text-slate-500'],
+                      ['Posición', openPosition ? `${openPosition.symbol} ${openPosition.side}` : 'Sin posición abierta', openPosition?.side === 'SHORT' ? 'text-rose-300' : openPosition?.side === 'LONG' ? 'text-emerald-300' : 'text-slate-500'],
+                    ].map(([label, value, className]) => (
+                      <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                        <p className={`mt-2 text-xl font-semibold ${className}`}>{value}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {[
-                  ['Win rate', `${performance?.win_rate ?? 0}%`, 'text-emerald-300'],
-                  ['Ganados', String(performance?.wins ?? 0), 'text-emerald-300'],
-                  ['Perdidos', String(performance?.losses ?? 0), 'text-rose-300'],
-                  ['Trades', String(performance?.total_trades ?? 0), 'text-white'],
-                  ['Drawdown', `${performance?.max_drawdown ?? 0}%`, 'text-rose-300'],
-                  ['Avg return', `${performance?.average_return ?? 0}%`, 'text-cyan-300'],
-                ].map(([label, value, className]) => <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p></div>)}
-              </div>
-              <div className="mt-5 h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
-                {performance?.equity_curve?.length && performance.equity_curve.length > 1 ? (
-                  <MiniSparkline values={performance.equity_curve.map((point) => point.equity)} tone="green" />
-                ) : (
-                  <div className="grid h-full place-items-center text-center">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-300">Esperando trades cerrados</p>
-                      <p className="mt-1 text-xs text-slate-500">Aquí irá la curva real del paper trading.</p>
-                    </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      ['Win rate', `${performance?.win_rate ?? 0}%`, 'text-emerald-300'],
+                      ['Ganados', String(performance?.wins ?? 0), 'text-emerald-300'],
+                      ['Perdidos', String(performance?.losses ?? 0), 'text-rose-300'],
+                      ['Trades', String(performance?.total_trades ?? 0), 'text-white'],
+                      ['Drawdown', `${performance?.max_drawdown ?? 0}%`, 'text-rose-300'],
+                      ['Avg return', `${performance?.average_return ?? 0}%`, 'text-cyan-300'],
+                    ].map(([label, value, className]) => <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p></div>)}
                   </div>
-                )}
-              </div>
+                  <div className="h-32 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                    {performance?.equity_curve?.length && performance.equity_curve.length > 1 ? (
+                      <MiniSparkline values={performance.equity_curve.map((point) => point.equity)} tone="green" />
+                    ) : (
+                      <div className="grid h-full place-items-center text-center">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-300">Esperando trades cerrados</p>
+                          <p className="mt-1 text-xs text-slate-500">Aquí irá la curva real del paper trading.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="premium-card p-5">
