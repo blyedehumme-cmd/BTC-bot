@@ -16,7 +16,7 @@ from indicators import add_indicators
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
-ASSETS = {"BTC": "BTC-USD", "ETH": "ETH-USD", "SOL": "SOL-USD", "BCH": "BCH-USD", "LTC": "LTC-USD"}
+ASSETS = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
 URL = "https://api.exchange.coinbase.com/products/{}/candles"
 START_TS = int(datetime(2021, 1, 1, tzinfo=timezone.utc).timestamp())
 NOW = int(time.time())
@@ -257,7 +257,7 @@ def main() -> None:
     trades_frame = pd.DataFrame(trades)
     equity_frame = pd.DataFrame(equity)
     months = (pd.to_datetime(rows["datetime"].max()) - pd.to_datetime(rows["datetime"].min())).days / 30.4375
-    print("PORTFOLIO BACKTEST BTC ETH SOL BCH LTC")
+    print("PORTFOLIO BACKTEST BTC ETH")
     print(f"capital_final={balance:.2f}")
     print(f"pnl_pct={(balance - INITIAL) / INITIAL * 100:.2f}")
     print(f"trades={len(trades_frame)}")

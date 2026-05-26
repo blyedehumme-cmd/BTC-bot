@@ -34,10 +34,7 @@ const timeframes = [
 ];
 const cryptoMarkets = [
   { symbol: 'BTC', display: 'BTCUSD', name: 'Bitcoin / US Dollar' },
-  { symbol: 'ETH', display: 'ETHUSDT', name: 'Ethereum / TetherUS' },
-  { symbol: 'SOL', display: 'SOLUSD', name: 'Solana / US Dollar' },
-  { symbol: 'BCH', display: 'BCHUSD', name: 'Bitcoin Cash / Dólar' },
-  { symbol: 'LTC', display: 'LTCUSD', name: 'Litecoin / Dólar' },
+  { symbol: 'ETH', display: 'ETHUSD', name: 'Ethereum / US Dollar' },
 ];
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
@@ -155,12 +152,17 @@ function parseDecisionSnapshot(logs?: AiLog[] | null, crypto?: string): Decision
   return null;
 }
 
-function parseOpenPositionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
+function parseOpenPositionSnapshot(logs?: AiLog[] | null, crypto?: string): DecisionSnapshot | null {
   for (const log of logs ?? []) {
     if (!log.condition_snapshot) continue;
     try {
       const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
-      if (Array.isArray(snapshot.open_positions)) return snapshot;
+      if (Array.isArray(snapshot.open_positions)) {
+        const matchingPosition = crypto
+          ? snapshot.open_positions.find((position) => matchesCrypto(position.symbol, crypto))
+          : snapshot.open_positions[0];
+        if (matchingPosition) return { ...snapshot, open_position: matchingPosition };
+      }
     } catch {
       continue;
     }
@@ -169,12 +171,23 @@ function parseOpenPositionSnapshot(logs?: AiLog[] | null): DecisionSnapshot | nu
     if (!log.condition_snapshot) continue;
     try {
       const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
-      if (snapshot.open_position?.status === 'OPEN') return snapshot;
+      if (snapshot.open_position?.status === 'OPEN' && (!crypto || matchesCrypto(snapshot.open_position.symbol, crypto))) return snapshot;
     } catch {
       continue;
     }
   }
   return null;
+}
+
+function logMatchesCrypto(log: AiLog, crypto: string) {
+  const text = `${log.message ?? ''} ${log.detail ?? ''}`.toUpperCase();
+  if (text.includes(crypto.toUpperCase())) return true;
+  if (!log.condition_snapshot) return false;
+  try {
+    return snapshotMatchesCrypto(JSON.parse(log.condition_snapshot) as DecisionSnapshot, crypto);
+  } catch {
+    return false;
+  }
 }
 
 function hmmContext(snapshot: DecisionSnapshot | null) {
@@ -598,15 +611,15 @@ function EquityPanel({ performance }: { performance: Performance | null }) {
   );
 }
 
-function BackendEventsPanel({ aiLogs }: { aiLogs?: AiLog[] | null }) {
+function BackendEventsPanel({ aiLogs, selectedCrypto }: { aiLogs?: AiLog[] | null; selectedCrypto: string }) {
   const [expanded, setExpanded] = useState(false);
-  const logs = aiLogs ?? [];
+  const logs = (aiLogs ?? []).filter((log) => logMatchesCrypto(log, selectedCrypto));
   const latestLog = logs[0];
   const visibleLogs = expanded ? logs.slice(0, 8) : logs.slice(0, 1);
 
   return (
     <div className="premium-card p-5">
-      <div className="panel-head"><h2>Eventos del backend</h2><span>{logs.length} logs</span></div>
+      <div className="panel-head"><h2>Eventos del backend</h2><span>{selectedCrypto} · {logs.length} logs</span></div>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -679,9 +692,11 @@ export default function PremiumDashboard() {
     }
   }, []);
 
-  const snapshot = latestForCrypto(snapshots, selectedCrypto) ?? latest(snapshots);
-  const activeSignal = latestForCrypto(signals, selectedCrypto) ?? latest(signals);
-  const recentTrades = (trades ?? []).slice(0, 5);
+  const snapshot = latestForCrypto(snapshots, selectedCrypto) ?? null;
+  const activeSignal = latestForCrypto(signals, selectedCrypto) ?? null;
+  const recentTrades = (trades ?? [])
+    .filter((trade) => !trade.symbol || matchesCrypto(trade.symbol, selectedCrypto))
+    .slice(0, 5);
   const signalHistory = (signals ?? [])
     .filter((item) => matchesCrypto(item.symbol, selectedCrypto))
     .filter((item) => item.id !== activeSignal?.id)
@@ -700,7 +715,7 @@ export default function PremiumDashboard() {
   const closedPaperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
-  const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs), [aiLogs]);
+  const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
   const openPosition = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
   const openPositionSymbol = openPosition?.symbol;
   const { data: openPositionLive } = usePolling<LiveMarket | null>(
@@ -991,7 +1006,7 @@ export default function PremiumDashboard() {
                 ))}
               </div>
             </div>
-            <BackendEventsPanel aiLogs={aiLogs} />
+            <BackendEventsPanel aiLogs={aiLogs} selectedCrypto={selectedCrypto} />
             <div className="premium-card p-5">
               <div className="panel-head"><h2>Últimas operaciones</h2><span>{recentTrades.length}</span></div>
               <div className="space-y-3">

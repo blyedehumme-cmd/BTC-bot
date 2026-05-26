@@ -26,6 +26,7 @@ export type MarketSnapshot = {
 
 export type Trade = {
   id: number;
+  symbol?: string;
   signal_id: number;
   entry_price: number;
   stop_loss: number | null;

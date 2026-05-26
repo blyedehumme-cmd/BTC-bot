@@ -63,7 +63,13 @@ services:
       - key: DYNAMIC_LEVERAGE_MID
         value: "2"
       - key: WATCHLIST
-        value: BTC
+        value: BTC,ETH
+      - key: SYMBOL_SIGNAL_SIDES
+        value: BTC:LONG,SHORT;ETH:SHORT
+      - key: TRAILING_ACTIVATION_ATR
+        value: "1.0"
+      - key: SYMBOL_HMM_REGIMES
+        value: ETH:4
       - key: MAX_TRADES_PER_DAY
         value: "3"
       - key: MIN_MINUTES_BETWEEN_TRADES

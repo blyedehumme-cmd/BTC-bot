@@ -2,9 +2,9 @@
 
 Bot de trading algorítmico para BTC con arquitectura multi-timeframe, gestión de riesgo y IA asistida.
 
-## Perfil activo: BTC Swing v1
+## Perfil activo: BTC + ETH
 
-La configuración de producción actual queda marcada como `btc_swing_v1` y está optimizada solo para BTC. No debe asumirse que estos mismos parámetros funcionan igual en ETH u otras criptomonedas.
+La configuración de producción actual queda limitada a BTC y ETH. BTC usa el perfil `btc_swing_v1`; ETH queda separado con reglas más restrictivas, operando solo señales SHORT en el perfil validado para ese activo.
 
 Resultado de referencia del backtest BTC swing validado:
 
@@ -15,7 +15,7 @@ Resultado de referencia del backtest BTC swing validado:
 - Win rate: `48.85%`
 - Trailing stop: `2.0 ATR` simple
 
-Por esa razón, el `WATCHLIST` de Render queda en `BTC` mientras ETH se trabaja como una estrategia separada. La próxima fase debe crear un perfil independiente, por ejemplo `eth_swing_v1`, con backtest propio antes de activarlo en producción.
+Por esa razón, el `WATCHLIST` de Render queda en `BTC,ETH`. Las demás criptomonedas no forman parte del frontend ni del backend activo.
 
 ## Características principales
 
@@ -50,8 +50,10 @@ Por esa razón, el `WATCHLIST` de Render queda en `BTC` mientras ETH se trabaja 
   - `KRAKEN_QUOTE_ASSET` (por defecto `ZUSD`)
   - `MAX_LEVERAGE` (capado internamente a `3x`)
   - `STRATEGY_PROFILE` (`btc_swing_v1` para la estrategia BTC actual)
-  - `OPTIMIZED_SYMBOLS` (`BTC` en producción hasta validar ETH por separado)
-  - `WATCHLIST` (`BTC` en producción para este perfil)
+  - `OPTIMIZED_SYMBOLS` (`BTC,ETH`)
+  - `WATCHLIST` (`BTC,ETH`)
+  - `SYMBOL_SIGNAL_SIDES` (`BTC:LONG,SHORT;ETH:SHORT`)
+  - `SYMBOL_HMM_REGIMES` (`ETH:4`)
   - `DRY_RUN` (`true` o `false`)
   - `USE_AI_ASSIST` (`true` o `false`)
   - `BACKEND_API_URL` (opcional, por ejemplo `https://<backend>/api`)

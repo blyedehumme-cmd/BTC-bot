@@ -83,6 +83,9 @@ DRY_RUN_BALANCE = float(os.getenv("DRY_RUN_BALANCE", "5000"))
 ATR_STOP_MULTIPLIER = float(os.getenv("ATR_STOP_MULTIPLIER", "1.5"))
 ATR_TAKE_PROFIT_MULTIPLIER = float(os.getenv("ATR_TAKE_PROFIT_MULTIPLIER", "3.0"))
 ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "2.0"))
+TRAILING_ACTIVATION_ATR = float(os.getenv("TRAILING_ACTIVATION_ATR", "0.0"))
+ALLOWED_SIGNAL_SIDES_RAW = os.getenv("ALLOWED_SIGNAL_SIDES", "LONG,SHORT").upper().strip()
+SYMBOL_SIGNAL_SIDES_RAW = os.getenv("SYMBOL_SIGNAL_SIDES", "").upper().strip()
 
 USE_AI_ASSIST = os.getenv("USE_AI_ASSIST", "false").lower().strip() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
@@ -90,6 +93,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 ENABLE_HMM_FILTER = os.getenv("ENABLE_HMM_FILTER", "false").lower().strip() == "true"
 ALLOWED_HMM_REGIMES_RAW = os.getenv("ALLOWED_HMM_REGIMES", "").strip()
+SYMBOL_HMM_REGIMES_RAW = os.getenv("SYMBOL_HMM_REGIMES", "").strip()
 HMM_REGIME_CONTEXT = os.getenv("HMM_REGIME_CONTEXT", "").strip()
 HMM_REGIME_CONTEXT_FILE = os.getenv("HMM_REGIME_CONTEXT_FILE", "").strip()
 
@@ -123,6 +127,46 @@ ALLOWED_HMM_REGIMES = {
     for item in ALLOWED_HMM_REGIMES_RAW.split(",")
     if item.strip().isdigit()
 } or None
+
+
+def parse_hmm_regimes(raw: str) -> Optional[set[int]]:
+    values = {int(item.strip()) for item in raw.split(",") if item.strip().isdigit()}
+    return values or None
+
+
+SYMBOL_HMM_REGIMES: Dict[str, Optional[set[int]]] = {}
+for chunk in SYMBOL_HMM_REGIMES_RAW.split(";"):
+    if ":" not in chunk:
+        continue
+    symbol_name, raw_regimes = chunk.split(":", 1)
+    symbol_name = symbol_name.strip().upper()
+    if symbol_name:
+        SYMBOL_HMM_REGIMES[symbol_name] = parse_hmm_regimes(raw_regimes)
+
+
+def allowed_hmm_regimes_for_symbol(symbol: str) -> Optional[set[int]]:
+    return SYMBOL_HMM_REGIMES.get(symbol.upper(), ALLOWED_HMM_REGIMES)
+
+
+def parse_signal_sides(raw: str) -> set[str]:
+    sides = {item.strip().upper() for item in raw.split(",") if item.strip()}
+    valid = sides & {"LONG", "SHORT"}
+    return valid or {"LONG", "SHORT"}
+
+
+ALLOWED_SIGNAL_SIDES = parse_signal_sides(ALLOWED_SIGNAL_SIDES_RAW)
+SYMBOL_SIGNAL_SIDES: Dict[str, set[str]] = {}
+for chunk in SYMBOL_SIGNAL_SIDES_RAW.split(";"):
+    if ":" not in chunk:
+        continue
+    symbol_name, raw_sides = chunk.split(":", 1)
+    symbol_name = symbol_name.strip().upper()
+    if symbol_name:
+        SYMBOL_SIGNAL_SIDES[symbol_name] = parse_signal_sides(raw_sides)
+
+
+def allowed_sides_for_symbol(symbol: str) -> set[str]:
+    return SYMBOL_SIGNAL_SIDES.get(symbol.upper(), ALLOWED_SIGNAL_SIDES)
 
 API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
 API_RETRY_BASE_DELAY = float(os.getenv("API_RETRY_BASE_DELAY", "1.0"))
@@ -163,9 +207,6 @@ CANDLE_LIMITS = {
 MARKETS = {
     "BTC": {"name": "Bitcoin", "spot_pair": "XBTUSD", "futures_symbol": "PI_XBTUSD", "coinbase": "BTC-USD"},
     "ETH": {"name": "Ethereum", "spot_pair": "ETHUSD", "futures_symbol": "PI_ETHUSD", "coinbase": "ETH-USD"},
-    "SOL": {"name": "Solana", "spot_pair": "SOLUSD", "futures_symbol": "PF_SOLUSD", "coinbase": "SOL-USD"},
-    "BCH": {"name": "Bitcoin Cash", "spot_pair": "BCHUSD", "futures_symbol": "PF_BCHUSD", "coinbase": "BCH-USD"},
-    "LTC": {"name": "Litecoin", "spot_pair": "LTCUSD", "futures_symbol": "PF_LTCUSD", "coinbase": "LTC-USD"},
 }
 
 WATCHLIST = [symbol for symbol in WATCHLIST if symbol in MARKETS] or ["BTC"]
@@ -1140,6 +1181,7 @@ def ai_assist_analysis(
 
 
 def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str, Any], hourly: Dict[str, Any], symbol: str = "") -> Dict[str, Any]:
+    allowed_sides = allowed_sides_for_symbol(symbol)
     atr_value = float(hourly.get("atr", 0.0))
     volatility_ratio = float(hourly.get("volatility_ratio", 0.0))
     volatility_ok = volatility_ratio <= MAX_CANDLE_ATR_MULTIPLIER if volatility_ratio > 0 else True
@@ -1197,6 +1239,17 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
         reasons: List[str] = []
         failures: List[str] = []
         check_rows: List[Dict[str, Any]] = []
+        side_allowed = direction in allowed_sides
+        if side_allowed:
+            reasons.append(f"{direction} permitido por perfil de {symbol or 'global'}")
+        else:
+            failures.append(f"{direction} bloqueado por perfil de {symbol or 'global'}")
+        check_rows.append({
+            "label": f"{direction} permitido",
+            "status": "ok" if side_allowed else "block",
+            "value": ",".join(sorted(allowed_sides)),
+            "detail": f"{direction} permitido" if side_allowed else f"{direction} no permitido para {symbol or 'global'}",
+        })
         context_ok, context_reason, context_failure = weekly_context[direction]
         if context_ok:
             reasons.append(context_reason)
@@ -1232,10 +1285,12 @@ def build_signal(weekly: Dict[str, Any], daily: Dict[str, Any], fourh: Dict[str,
             "reasons": reasons,
             "failures": failures,
             "checks": check_rows,
-            "strict_ok": context_ok and not failures and atr_value > 0,
+            "strict_ok": side_allowed and context_ok and not failures and atr_value > 0,
+            "side_allowed": side_allowed,
         })
 
-    best_candidate = max(candidates, key=lambda item: float(item["confidence"]))
+    allowed_candidates = [candidate for candidate in candidates if candidate.get("side_allowed")]
+    best_candidate = max(allowed_candidates or candidates, key=lambda item: float(item["confidence"]))
     best_direction = str(best_candidate["direction"])
     best_confidence = float(best_candidate["confidence"])
     strict_ok = bool(best_candidate["strict_ok"])
@@ -1560,7 +1615,7 @@ def evaluate_supervised_analysis(analysis: Dict[str, Any], balance: float) -> Di
         min_confidence=MIN_CONFIDENCE,
         use_ai_assist=USE_AI_ASSIST,
         hmm_filter_enabled=ENABLE_HMM_FILTER,
-        allowed_hmm_regimes=ALLOWED_HMM_REGIMES,
+        allowed_hmm_regimes=allowed_hmm_regimes_for_symbol(str(analysis.get("symbol", WATCHLIST[0]))),
         active_positions=len(active_positions()),
         max_open_positions=MAX_OPEN_POSITIONS,
         daily_trades=state.daily_trades,
@@ -1917,6 +1972,8 @@ def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
         if price >= state.take_profit:
             return "TAKE_PROFIT"
         if hourly.get("adx", 0.0) >= ADX_THRESHOLD and atr_value > 0:
+            if state.highest_price < state.entry_price + (atr_value * TRAILING_ACTIVATION_ATR):
+                return None
             state.stop_loss = max(state.stop_loss, state.highest_price - (atr_value * ATR_TRAILING_MULTIPLIER))
     elif state.side == "SHORT":
         state.lowest_price = min(state.lowest_price if state.lowest_price > 0 else price, price)
@@ -1925,6 +1982,8 @@ def manage_open_position(price: float, hourly: Dict[str, Any]) -> Optional[str]:
         if price <= state.take_profit:
             return "TAKE_PROFIT"
         if hourly.get("adx", 0.0) >= ADX_THRESHOLD and atr_value > 0:
+            if state.lowest_price > state.entry_price - (atr_value * TRAILING_ACTIVATION_ATR):
+                return None
             state.stop_loss = min(state.stop_loss, state.lowest_price + (atr_value * ATR_TRAILING_MULTIPLIER))
     return None
 
@@ -2019,6 +2078,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"DRY_RUN: {DRY_RUN}\n"
         f"ALLOW_REAL_SPOT_SHORT: {ALLOW_REAL_SPOT_SHORT}\n"
         f"ALLOW_SHORT_SIGNALS: {ALLOW_SHORT_SIGNALS}\n"
+        f"Lados permitidos global: {', '.join(sorted(ALLOWED_SIGNAL_SIDES))}\n"
+        f"Lados por simbolo: {SYMBOL_SIGNAL_SIDES_RAW or 'no configurado'}\n"
         f"USE_CLOSED_CANDLES: {USE_CLOSED_CANDLES}\n"
         f"IA asistida: {USE_AI_ASSIST}\n"
         f"ADX threshold: {ADX_THRESHOLD:.2f}\n"
@@ -2028,6 +2089,9 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Max entrada tardia EMA50: {MAX_ENTRY_EMA50_ATR_DISTANCE:.2f} ATR\n"
         f"Racha wins mismo lado: {SAME_SIDE_WIN_STREAK_LIMIT}\n"
         f"Noticias IA: {'configuradas' if NEWS_CONTEXT_URL or NEWS_RISK_CONTEXT else 'no configuradas'}\n"
+        f"HMM filtro: {ENABLE_HMM_FILTER}\n"
+        f"HMM regimenes global: {sorted(ALLOWED_HMM_REGIMES) if ALLOWED_HMM_REGIMES else 'no configurado'}\n"
+        f"HMM regimenes por simbolo: {SYMBOL_HMM_REGIMES_RAW or 'no configurado'}\n"
         f"Riesgo por trade: {MAX_RISK_PER_TRADE * 100:.2f}%\n"
         f"Limite perdida diaria: {MAX_DAILY_LOSS * 100:.2f}%\n"
         f"Confianza minima: {MIN_CONFIDENCE:.2f}\n"
@@ -2035,7 +2099,8 @@ async def config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Max posiciones abiertas: {MAX_OPEN_POSITIONS}\n"
         f"SL ATR: {ATR_STOP_MULTIPLIER:.2f}x\n"
         f"TP ATR: {ATR_TAKE_PROFIT_MULTIPLIER:.2f}x\n"
-        f"Trailing ATR: {ATR_TRAILING_MULTIPLIER:.2f}x"
+        f"Trailing ATR: {ATR_TRAILING_MULTIPLIER:.2f}x\n"
+        f"Activacion trailing: {TRAILING_ACTIVATION_ATR:.2f} ATR"
     )
 
 

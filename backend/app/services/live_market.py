@@ -55,30 +55,6 @@ MARKET_SYMBOLS = {
         'binance': 'ETHUSDT',
         'binance_display': 'ETH-USDT',
     },
-    'SOL': {
-        'label': 'Solana',
-        'coinbase': 'SOL-USD',
-        'kraken': 'SOLUSD',
-        'kraken_display': 'SOL-USD',
-        'binance': 'SOLUSDT',
-        'binance_display': 'SOL-USDT',
-    },
-    'BCH': {
-        'label': 'Bitcoin Cash',
-        'coinbase': 'BCH-USD',
-        'kraken': 'BCHUSD',
-        'kraken_display': 'BCH-USD',
-        'binance': 'BCHUSDT',
-        'binance_display': 'BCH-USDT',
-    },
-    'LTC': {
-        'label': 'Litecoin',
-        'coinbase': 'LTC-USD',
-        'kraken': 'LTCUSD',
-        'kraken_display': 'LTC-USD',
-        'binance': 'LTCUSDT',
-        'binance_display': 'LTC-USDT',
-    },
 }
 
 
@@ -95,12 +71,6 @@ def _normalize_asset(symbol: str | None) -> str:
         'BTCUSDT': 'BTC',
         'ETHUSD': 'ETH',
         'ETHUSDT': 'ETH',
-        'SOLUSD': 'SOL',
-        'SOLUSDT': 'SOL',
-        'BCHUSD': 'BCH',
-        'BCHUSDT': 'BCH',
-        'LTCUSD': 'LTC',
-        'LTCUSDT': 'LTC',
     }
     normalized = aliases.get(normalized.replace('-', '').replace('/', ''), normalized)
     return normalized if normalized in MARKET_SYMBOLS else 'BTC'
