@@ -11,6 +11,7 @@ import {
   fetchPerformance,
   fetchSignals,
   fetchTrades,
+  fetchUserPaperRuntime,
   startBot,
   stopBot,
   updateStopLoss,
@@ -22,6 +23,7 @@ import {
   type Performance,
   type Signal,
   type Trade,
+  type UserPaperRuntime,
 } from '../lib/pollingFetchers';
 import { formatNewYorkDateTime, formatNewYorkTime } from '../lib/time';
 import { usePolling } from '../lib/usePolling';
@@ -222,6 +224,25 @@ function parsePaperAccountSnapshot(logs?: AiLog[] | null): DecisionSnapshot | nu
     }
   }
   return null;
+}
+
+function runtimePositionToSnapshot(position: UserPaperRuntime['open_positions'][number]): NonNullable<DecisionSnapshot['open_position']> {
+  return {
+    status: position.status,
+    symbol: position.symbol,
+    entry_timeframe: position.timeframe,
+    side: position.side,
+    entry_price: position.entry_price,
+    mark_price: position.mark_price,
+    position_size: position.size,
+    position_usd: position.notional,
+    margin_reserved: position.margin_reserved,
+    stop_loss: position.stop_loss ?? undefined,
+    take_profit: position.take_profit ?? undefined,
+    leverage: position.leverage,
+    opened_at: position.opened_at,
+    reason: 'Runtime paper del usuario.',
+  };
 }
 
 function logMatchesCrypto(log: AiLog, crypto: string) {
@@ -786,6 +807,7 @@ export default function PremiumDashboard() {
   const { data: aiStatus } = usePolling<AiStatus>(useCallback(() => fetchAiStatus(), []), 5000);
   const { data: aiLogs } = usePolling<AiLog[]>(useCallback(() => fetchAiLogs(), []), 4500);
   const { data: polledBotControl } = usePolling<BotControl>(useCallback(() => fetchBotControl(), []), 3000);
+  const { data: userPaperRuntime } = usePolling<UserPaperRuntime>(useCallback(() => fetchUserPaperRuntime(), []), 3500);
 
   useEffect(() => {
     if (polledBotControl) {
@@ -862,10 +884,15 @@ export default function PremiumDashboard() {
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
   const paperAccountSnapshot = useMemo(() => parsePaperAccountSnapshot(aiLogs), [aiLogs]);
   const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
-  const openPositionRaw = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
+  const runtimeOpenPositions = userPaperRuntime?.open_positions ?? [];
+  const runtimeSelectedPosition = runtimeOpenPositions.find((position) => matchesCrypto(position.symbol, selectedCrypto));
+  const runtimeOpenPositionRaw = runtimeSelectedPosition ? runtimePositionToSnapshot(runtimeSelectedPosition) : null;
+  const openPositionRaw = runtimeOpenPositionRaw ?? (openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null);
   const allOpenPositions = useMemo(
-    () => paperAccountSnapshot?.open_positions?.filter((position) => position.status === 'OPEN') ?? [],
-    [paperAccountSnapshot],
+    () => runtimeOpenPositions.length
+      ? runtimeOpenPositions.map(runtimePositionToSnapshot)
+      : paperAccountSnapshot?.open_positions?.filter((position) => position.status === 'OPEN') ?? [],
+    [paperAccountSnapshot, runtimeOpenPositions],
   );
   const openPositionSymbol = openPositionRaw?.symbol;
   const { data: openPositionLive } = usePolling<LiveMarket | null>(
@@ -882,7 +909,7 @@ export default function PremiumDashboard() {
       ? price
       : openPositionLive?.price ?? openPositionRaw.mark_price ?? 0
     : 0;
-  const openPositionIsStale = positionExitAlreadyCrossed(openPositionRaw, openPositionMarkPrice);
+  const openPositionIsStale = runtimeOpenPositionRaw ? false : positionExitAlreadyCrossed(openPositionRaw, openPositionMarkPrice);
   const openPosition = openPositionIsStale ? null : openPositionRaw;
   const openPositionNotional = openPosition?.position_usd ?? 0;
   const openPositionLeverage = openPosition?.leverage && openPosition.leverage > 0 ? openPosition.leverage : 1;
@@ -893,16 +920,18 @@ export default function PremiumDashboard() {
       : (openPositionMarkPrice - openPosition.entry_price) * openPosition.position_size
     : 0;
   const floatingPnlPct = marginReserved ? (floatingPnl / marginReserved) * 100 : 0;
-  const accountStartingBalance = paperAccountSnapshot?.paper_starting_balance ?? paperStartingBalance;
-  const accountClosedBalance = paperAccountSnapshot?.paper_balance ?? closedPaperEquity;
-  const accountFloatingPnl = openPositionIsStale ? 0 : paperAccountSnapshot?.unrealized_pnl ?? floatingPnl;
-  const accountPaperEquity = openPositionIsStale ? accountClosedBalance : paperAccountSnapshot?.paper_equity ?? (closedPaperEquity + floatingPnl);
-  const accountMarginReserved = openPositionIsStale ? 0 : paperAccountSnapshot?.margin_reserved ?? marginReserved;
-  const accountOpenNotional = openPositionIsStale ? 0 : paperAccountSnapshot?.open_notional ?? openPositionNotional;
-  const accountAvailableBalance = openPositionIsStale ? accountClosedBalance : paperAccountSnapshot?.available_balance ?? Math.max(closedPaperEquity - marginReserved, 0);
-  const openPositionsCount = openPositionIsStale
-    ? allOpenPositions.filter((position) => !matchesCrypto(position.symbol, selectedCrypto)).length
-    : allOpenPositions.length;
+  const accountStartingBalance = userPaperRuntime?.account.starting_balance ?? paperAccountSnapshot?.paper_starting_balance ?? paperStartingBalance;
+  const accountClosedBalance = userPaperRuntime?.account.cash_balance ?? paperAccountSnapshot?.paper_balance ?? closedPaperEquity;
+  const accountFloatingPnl = openPositionIsStale ? 0 : userPaperRuntime?.account.unrealized_pnl ?? paperAccountSnapshot?.unrealized_pnl ?? floatingPnl;
+  const accountPaperEquity = openPositionIsStale ? accountClosedBalance : userPaperRuntime?.account.equity ?? paperAccountSnapshot?.paper_equity ?? (closedPaperEquity + floatingPnl);
+  const accountMarginReserved = openPositionIsStale ? 0 : userPaperRuntime?.account.margin_reserved ?? paperAccountSnapshot?.margin_reserved ?? marginReserved;
+  const accountOpenNotional = openPositionIsStale ? 0 : userPaperRuntime?.account.open_notional ?? paperAccountSnapshot?.open_notional ?? openPositionNotional;
+  const accountAvailableBalance = openPositionIsStale ? accountClosedBalance : userPaperRuntime?.account.cash_balance ?? paperAccountSnapshot?.available_balance ?? Math.max(closedPaperEquity - marginReserved, 0);
+  const openPositionsCount = userPaperRuntime?.open_positions_count ?? (
+    openPositionIsStale
+      ? allOpenPositions.filter((position) => !matchesCrypto(position.symbol, selectedCrypto)).length
+      : allOpenPositions.length
+  );
   const totalPaperPnlPct = ((accountPaperEquity / accountStartingBalance) - 1) * 100;
   const realizedPaperPnlPct = ((accountClosedBalance / accountStartingBalance) - 1) * 100;
   const riskAtStop = openPosition?.entry_price && openPosition?.stop_loss && openPosition?.position_size
