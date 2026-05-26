@@ -226,6 +226,7 @@ telegram_bot: Optional[Bot] = None
 ai_decision_cache: Dict[str, Dict[str, Any]] = {}
 last_positions_status_key = ""
 handled_manual_close_requests: set[str] = set()
+handled_stop_loss_update_requests: set[str] = set()
 MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS = int(os.getenv("MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS", "1800"))
 
 
@@ -658,6 +659,58 @@ def manual_close_request_for_position(position: Dict[str, Any], requests_to_clos
         handled_manual_close_requests.add(str(request.get("key")))
         return request
     return None
+
+
+async def fetch_stop_loss_update_requests() -> List[Dict[str, Any]]:
+    if not BACKEND_API_URL or not DRY_RUN:
+        return []
+    payload = await asyncio.to_thread(lambda: _get_json_from_backend("logs"))
+    if not isinstance(payload, list):
+        return []
+    update_requests: List[Dict[str, Any]] = []
+    now_ts = time.time()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        snapshot_raw = item.get("condition_snapshot")
+        if not snapshot_raw:
+            continue
+        try:
+            snapshot = json.loads(snapshot_raw)
+        except Exception:
+            continue
+        if snapshot.get("action") != "update_stop_loss":
+            continue
+        symbol = str(snapshot.get("symbol", "")).upper().strip()
+        stop_loss = float(snapshot.get("stop_loss", 0.0) or 0.0)
+        requested_at = snapshot.get("requested_at") or item.get("timestamp")
+        requested_ts = _parse_backend_timestamp(requested_at)
+        if not symbol or stop_loss <= 0 or requested_ts <= 0:
+            continue
+        key = f"{symbol}:{requested_at}:{stop_loss}"
+        if key in handled_stop_loss_update_requests:
+            continue
+        if now_ts - requested_ts > MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS:
+            handled_stop_loss_update_requests.add(key)
+            continue
+        update_requests.append({"symbol": symbol, "stop_loss": stop_loss, "requested_ts": requested_ts, "key": key})
+    return update_requests
+
+
+def stop_loss_update_for_position(position: Dict[str, Any], update_requests: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    symbol = str(position.get("symbol", "")).upper()
+    opened_ts = float(position.get("last_trade_ts", 0.0) or 0.0)
+    matching = None
+    for request in update_requests:
+        if request.get("symbol") != symbol:
+            continue
+        if float(request.get("requested_ts", 0.0)) < opened_ts - 5:
+            handled_stop_loss_update_requests.add(str(request.get("key")))
+            continue
+        matching = request
+    if matching:
+        handled_stop_loss_update_requests.add(str(matching.get("key")))
+    return matching
 
 
 def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
@@ -2239,6 +2292,7 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
     analyses: List[Dict[str, Any]] = []
     kept_positions: List[Dict[str, Any]] = []
     manual_close_requests = await fetch_manual_close_requests()
+    stop_loss_update_requests = await fetch_stop_loss_update_requests()
     for position in list(active_positions()):
         set_state_from_position(position)
         analysis = analyze_market(state.position_symbol)
@@ -2247,6 +2301,12 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
         timeframe_analysis_data = analysis.get(analysis_key_for_timeframe(entry_timeframe)) or analysis.get("entry_analysis") or analysis.get("hourly", {})
         price = float(timeframe_analysis_data.get("price", analysis.get("price", 0.0)))
         position["last_mark_price"] = price
+        stop_loss_update = stop_loss_update_for_position(position, stop_loss_update_requests)
+        if stop_loss_update:
+            next_stop = float(stop_loss_update.get("stop_loss", state.stop_loss))
+            state.stop_loss = next_stop
+            position["stop_loss"] = next_stop
+            logger.info("stop_loss_updated symbol=%s side=%s stop_loss=%.2f source=dashboard", state.position_symbol, state.side, next_stop)
         manual_close_request = manual_close_request_for_position(position, manual_close_requests)
         exit_reason = "MANUAL_CLOSE" if manual_close_request else manage_open_position(price, timeframe_analysis_data)
         if exit_reason:

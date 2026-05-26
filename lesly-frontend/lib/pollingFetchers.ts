@@ -128,6 +128,10 @@ export type ManualCloseResponse = {
   message: string;
 };
 
+export type StopLossUpdateResponse = ManualCloseResponse & {
+  stop_loss?: number;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -141,3 +145,6 @@ export const fetchBotControl = () => fetchJson<BotControl>('/bot/status');
 export const startBot = () => postJson<BotControl>('/bot/start');
 export const stopBot = () => postJson<BotControl>('/bot/stop');
 export const closePosition = (symbol: string) => postJson<ManualCloseResponse>('/bot/close-position', { symbol });
+export const updateStopLoss = (symbol: string, stopLoss: number) => (
+  postJson<StopLossUpdateResponse>('/bot/update-stop-loss', { symbol, stop_loss: stopLoss })
+);

@@ -13,6 +13,7 @@ import {
   fetchTrades,
   startBot,
   stopBot,
+  updateStopLoss,
   type AiLog,
   type AiStatus,
   type BotControl,
@@ -768,6 +769,9 @@ export default function PremiumDashboard() {
   const [botActionMessage, setBotActionMessage] = useState('');
   const [closeActionBusy, setCloseActionBusy] = useState(false);
   const [closeActionMessage, setCloseActionMessage] = useState('');
+  const [stopLossDraft, setStopLossDraft] = useState('');
+  const [stopLossActionBusy, setStopLossActionBusy] = useState(false);
+  const [stopLossActionMessage, setStopLossActionMessage] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [paperPanelOpen, setPaperPanelOpen] = useState(false);
   const [summaryPanelOpen, setSummaryPanelOpen] = useState(false);
@@ -813,6 +817,23 @@ export default function PremiumDashboard() {
       setCloseActionMessage('No se pudo solicitar el cierre manual. Revisa backend.');
     } finally {
       setCloseActionBusy(false);
+    }
+  }, []);
+
+  const runStopLossUpdate = useCallback(async (symbol: string, stopLoss: number) => {
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) {
+      setStopLossActionMessage('Stop loss inválido.');
+      return;
+    }
+    setStopLossActionBusy(true);
+    setStopLossActionMessage(`Solicitando nuevo SL ${formatMoney(stopLoss)}...`);
+    try {
+      const response = await updateStopLoss(symbol, stopLoss);
+      setStopLossActionMessage(response.message || `Stop loss solicitado para ${symbol}.`);
+    } catch {
+      setStopLossActionMessage('No se pudo actualizar el stop loss. Revisa backend.');
+    } finally {
+      setStopLossActionBusy(false);
     }
   }, []);
 
@@ -908,6 +929,13 @@ export default function PremiumDashboard() {
   const hmmInfo = hmmContext(decisionSnapshot);
   const signalExplanation = activeSignal?.explanation
     || (blockedReasons.length ? `WAIT: ${blockedReasons.slice(0, 3).join(', ')}` : 'Esperando el próximo análisis del bot.');
+
+  useEffect(() => {
+    if (openPosition?.stop_loss) {
+      setStopLossDraft(String(Number(openPosition.stop_loss).toFixed(2)));
+      setStopLossActionMessage('');
+    }
+  }, [openPosition?.symbol, openPosition?.stop_loss]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background text-slate-100">
@@ -1158,6 +1186,42 @@ export default function PremiumDashboard() {
                     <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(openPosition.take_profit)}</p></div>
                   </div>
                   {closeActionMessage && <p className="mt-3 text-xs text-cyan-200">{closeActionMessage}</p>}
+                  <div className="mt-4 rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <label className="min-w-[150px] flex-1">
+                        <span className="text-xs uppercase tracking-[0.16em] text-slate-500">Mover stop loss</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={stopLossDraft}
+                          onChange={(event) => setStopLossDraft(event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-cyan-400/20 bg-black/35 px-3 py-2 text-sm font-semibold text-white outline-none transition focus:border-cyan-300"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={stopLossActionBusy}
+                        onClick={() => {
+                          const entry = Number(openPosition.entry_price ?? 0);
+                          setStopLossDraft(entry ? entry.toFixed(2) : '');
+                          if (entry) runStopLossUpdate(openPosition.symbol ?? selectedCrypto, entry);
+                        }}
+                        className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200 transition hover:border-emerald-200 hover:bg-emerald-300/20 disabled:opacity-50"
+                      >
+                        SL entrada
+                      </button>
+                      <button
+                        type="button"
+                        disabled={stopLossActionBusy}
+                        onClick={() => runStopLossUpdate(openPosition.symbol ?? selectedCrypto, Number(stopLossDraft))}
+                        className="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/20 disabled:opacity-50"
+                      >
+                        Guardar SL
+                      </button>
+                    </div>
+                    {stopLossActionMessage && <p className="mt-3 text-xs text-cyan-200">{stopLossActionMessage}</p>}
+                  </div>
                   <p className="mt-4 text-xs text-slate-500">Abierta NY {formatNewYorkDateTime(openPosition.opened_at)}</p>
                 </div>
               )}

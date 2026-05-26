@@ -4,13 +4,18 @@ from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.schemas.schemas import BotControlResponse
-from app.services.bot_control import get_bot_control, request_manual_close, set_bot_active
+from app.services.bot_control import get_bot_control, request_manual_close, request_stop_loss_update, set_bot_active
 
 router = APIRouter()
 
 
 class ManualCloseRequest(BaseModel):
     symbol: str
+
+
+class StopLossUpdateRequest(BaseModel):
+    symbol: str
+    stop_loss: float
 
 
 @router.get('/status', response_model=BotControlResponse)
@@ -35,3 +40,9 @@ async def stop_bot(db: AsyncSession = Depends(get_db)):
 @router.post('/close-position/')
 async def close_position(payload: ManualCloseRequest, db: AsyncSession = Depends(get_db)):
     return await request_manual_close(db, payload.symbol)
+
+
+@router.post('/update-stop-loss')
+@router.post('/update-stop-loss/')
+async def update_stop_loss(payload: StopLossUpdateRequest, db: AsyncSession = Depends(get_db)):
+    return await request_stop_loss_update(db, payload.symbol, payload.stop_loss)

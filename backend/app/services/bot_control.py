@@ -96,3 +96,41 @@ async def request_manual_close(db: AsyncSession, symbol: str, updated_by: str = 
         'requested_at': now.isoformat() + 'Z',
         'message': f'Manual close requested for {normalized_symbol}.',
     }
+
+
+async def request_stop_loss_update(db: AsyncSession, symbol: str, stop_loss: float, updated_by: str = 'dashboard') -> dict[str, object]:
+    normalized_symbol = symbol.strip().upper()
+    if stop_loss <= 0:
+        return {
+            'accepted': False,
+            'symbol': normalized_symbol,
+            'requested_at': datetime.utcnow().isoformat() + 'Z',
+            'message': 'Stop loss must be greater than 0.',
+        }
+    now = datetime.utcnow()
+    snapshot = {
+        'action': 'update_stop_loss',
+        'symbol': normalized_symbol,
+        'stop_loss': float(stop_loss),
+        'requested_at': now.isoformat() + 'Z',
+        'source': updated_by,
+    }
+    log = AiDecision(
+        signal_id=0,
+        decision_type='stop_loss_update_request',
+        reason=f'Stop loss update requested for {normalized_symbol}: {stop_loss:.2f}.',
+        condition_snapshot=json.dumps(snapshot),
+        explanation=f'Dashboard requested paper stop loss update for {normalized_symbol} to {stop_loss:.2f}.',
+        timestamp=now,
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+    logger.info('stop_loss_update_requested symbol=%s stop_loss=%.2f updated_by=%s', normalized_symbol, stop_loss, updated_by)
+    return {
+        'accepted': True,
+        'symbol': normalized_symbol,
+        'stop_loss': float(stop_loss),
+        'requested_at': now.isoformat() + 'Z',
+        'message': f'Stop loss update requested for {normalized_symbol}.',
+    }
