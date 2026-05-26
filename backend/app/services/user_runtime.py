@@ -225,3 +225,124 @@ async def build_user_runtime_snapshot(
         open_positions_count=len(open_positions),
         max_open_positions=settings.max_open_positions,
     )
+
+
+async def select_global_worker_user(db: AsyncSession) -> tuple[User, UserBotSettings] | None:
+    result = await db.execute(
+        select(User, UserBotSettings)
+        .join(UserBotSettings, UserBotSettings.user_id == User.id)
+        .where(User.is_active.is_(True), UserBotSettings.active.is_(True))
+        .order_by(UserBotSettings.updated_at.desc())
+    )
+    row = result.first()
+    if row is None:
+        fallback = await db.execute(
+            select(User, UserBotSettings)
+            .join(UserBotSettings, UserBotSettings.user_id == User.id)
+            .where(User.is_active.is_(True))
+            .order_by(User.created_at.asc())
+        )
+        row = fallback.first()
+    if row is None:
+        return None
+    return row[0], row[1]
+
+
+def _safe_json_loads(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _normalize_worker_positions(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    positions = snapshot.get('open_positions')
+    if isinstance(positions, list):
+        return [position for position in positions if isinstance(position, dict)]
+    position = snapshot.get('open_position')
+    if isinstance(position, dict) and position.get('status') == 'OPEN':
+        return [position]
+    return []
+
+
+async def sync_global_worker_decision_to_user_runtime(
+    db: AsyncSession,
+    decision_type: str,
+    condition_snapshot: str | None,
+    reason: str,
+    explanation: str,
+) -> None:
+    if decision_type not in {'position_status', 'position_opened'}:
+        return
+
+    selected = await select_global_worker_user(db)
+    if selected is None:
+        return
+    user, settings = selected
+    snapshot = _safe_json_loads(condition_snapshot)
+    if not snapshot:
+        return
+
+    account = await get_or_create_user_paper_account(user, settings, db)
+    now = datetime.utcnow()
+    account.starting_balance = float(snapshot.get('paper_starting_balance', account.starting_balance) or account.starting_balance)
+    account.cash_balance = float(snapshot.get('available_balance', snapshot.get('paper_balance', account.cash_balance)) or 0.0)
+    account.equity = float(snapshot.get('paper_equity', account.equity) or 0.0)
+    account.realized_pnl = float(snapshot.get('realized_pnl', account.realized_pnl) or 0.0)
+    account.unrealized_pnl = float(snapshot.get('unrealized_pnl', account.unrealized_pnl) or 0.0)
+    account.margin_reserved = float(snapshot.get('margin_reserved', account.margin_reserved) or 0.0)
+    account.open_notional = float(snapshot.get('open_notional', account.open_notional) or 0.0)
+    account.updated_at = now
+
+    positions = _normalize_worker_positions(snapshot)
+    await db.execute(
+        delete(UserPaperPosition).where(UserPaperPosition.user_id == user.id, UserPaperPosition.status == 'OPEN')
+    )
+    for raw_position in positions:
+        symbol = str(raw_position.get('symbol', '')).upper()
+        side = str(raw_position.get('side', '')).upper()
+        if not symbol or side not in {'LONG', 'SHORT'}:
+            continue
+        opened_at_raw = raw_position.get('opened_at')
+        try:
+            opened_at = datetime.fromisoformat(str(opened_at_raw).replace('Z', '+00:00')).replace(tzinfo=None)
+        except (TypeError, ValueError):
+            opened_at = now
+        position = UserPaperPosition(
+            user_id=user.id,
+            symbol=symbol,
+            side=side,
+            timeframe=str(raw_position.get('entry_timeframe', '1H')).upper(),
+            entry_price=float(raw_position.get('entry_price', 0.0) or 0.0),
+            mark_price=float(raw_position.get('mark_price', raw_position.get('entry_price', 0.0)) or 0.0),
+            size=float(raw_position.get('position_size', 0.0) or 0.0),
+            notional=float(raw_position.get('position_usd', 0.0) or 0.0),
+            margin_reserved=float(raw_position.get('margin_reserved', 0.0) or 0.0),
+            stop_loss=float(raw_position['stop_loss']) if raw_position.get('stop_loss') is not None else None,
+            take_profit=float(raw_position['take_profit']) if raw_position.get('take_profit') is not None else None,
+            leverage=float(raw_position.get('leverage', 1.0) or 1.0),
+            status='OPEN',
+            opened_at=opened_at,
+            realized_pnl=0.0,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(position)
+
+    await log_user_event(
+        user=user,
+        db=db,
+        event_type=decision_type,
+        severity='success' if positions else 'info',
+        message=reason[:240],
+        detail=explanation[:1200],
+        payload={
+            'source': 'global_worker',
+            'open_positions': len(positions),
+            'paper_equity': account.equity,
+            'available_balance': account.cash_balance,
+        },
+    )

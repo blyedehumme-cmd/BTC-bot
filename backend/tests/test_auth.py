@@ -1,4 +1,5 @@
 import pytest
+import json
 from uuid import uuid4
 
 
@@ -106,6 +107,49 @@ async def test_register_login_and_exchange_account(client):
     reset_payload = reset_runtime.json()
     assert reset_payload['account']['cash_balance'] == 7500.0
     assert reset_payload['latest_events'][0]['event_type'] == 'paper_runtime_reset'
+
+    worker_status = await client.post(
+        '/api/ai/decisions',
+        json={
+            'signal_id': 0,
+            'decision_type': 'position_status',
+            'reason': 'Worker status: 1 open.',
+            'condition_snapshot': json.dumps({
+                'paper_starting_balance': 7500.0,
+                'paper_balance': 7600.0,
+                'available_balance': 5100.0,
+                'margin_reserved': 2500.0,
+                'open_notional': 7500.0,
+                'unrealized_pnl': 100.0,
+                'paper_equity': 7700.0,
+                'realized_pnl': 100.0,
+                'open_positions': [{
+                    'status': 'OPEN',
+                    'symbol': 'BTC',
+                    'entry_timeframe': '1D',
+                    'side': 'LONG',
+                    'entry_price': 76000.0,
+                    'mark_price': 77000.0,
+                    'position_size': 0.1,
+                    'position_usd': 7500.0,
+                    'margin_reserved': 2500.0,
+                    'stop_loss': 74500.0,
+                    'take_profit': 80000.0,
+                    'leverage': 3.0,
+                    'opened_at': '2026-05-25T04:00:00Z',
+                }],
+            }),
+            'explanation': 'Estado actual de posiciones paper publicado por el worker.',
+        },
+    )
+    assert worker_status.status_code == 200
+    synced_runtime = await client.get('/api/auth/paper-runtime', headers={'Authorization': f'Bearer {token}'})
+    assert synced_runtime.status_code == 200
+    synced_payload = synced_runtime.json()
+    assert synced_payload['account']['equity'] == 7700.0
+    assert synced_payload['open_positions_count'] == 1
+    assert synced_payload['open_positions'][0]['symbol'] == 'BTC'
+    assert synced_payload['open_positions'][0]['leverage'] == 3.0
 
     login = await client.post('/api/auth/login', json={
         'email': email,
