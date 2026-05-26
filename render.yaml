@@ -47,7 +47,7 @@ services:
       - key: STRATEGY_PROFILE
         value: btc_swing_v1
       - key: OPTIMIZED_SYMBOLS
-        value: BTC
+        value: BTC,ETH
       - key: PRODUCT_ID
         value: BTC-USDC
       - key: EXCHANGE
@@ -79,7 +79,7 @@ services:
       - key: MAX_POSITION_BALANCE_PCT
         value: "1.0"
       - key: MAX_OPEN_POSITIONS
-        value: "1"
+        value: "2"
       - key: ADX_THRESHOLD
         value: "24"
       - key: VOLUME_HEALTH_MIN

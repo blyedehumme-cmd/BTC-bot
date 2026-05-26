@@ -417,6 +417,43 @@ def open_position_symbols() -> set[str]:
     return {str(position.get("symbol", "")).upper() for position in active_positions()}
 
 
+def position_margin(position: Dict[str, Any]) -> float:
+    leverage = float(position.get("leverage", 1.0) or 1.0)
+    if leverage <= 0:
+        leverage = 1.0
+    return float(position.get("position_usd", 0.0) or 0.0) / leverage
+
+
+def position_unrealized_pnl(position: Dict[str, Any]) -> float:
+    mark_price = float(position.get("last_mark_price", position.get("entry_price", 0.0)) or 0.0)
+    entry_price = float(position.get("entry_price", 0.0) or 0.0)
+    size = float(position.get("position_size_btc", 0.0) or 0.0)
+    if mark_price <= 0 or entry_price <= 0 or size <= 0:
+        return 0.0
+    if str(position.get("side", "")).upper() == "SHORT":
+        return (entry_price - mark_price) * size
+    return (mark_price - entry_price) * size
+
+
+def paper_account_summary() -> Dict[str, float]:
+    closed_balance = DRY_RUN_BALANCE + state.stats.simulated_pnl_usd
+    margin_reserved = sum(position_margin(position) for position in active_positions())
+    unrealized = sum(position_unrealized_pnl(position) for position in active_positions())
+    equity = closed_balance + unrealized
+    available = max(closed_balance - margin_reserved, 0.0)
+    open_notional = sum(float(position.get("position_usd", 0.0) or 0.0) for position in active_positions())
+    return {
+        "paper_starting_balance": DRY_RUN_BALANCE,
+        "paper_balance": closed_balance,
+        "available_balance": available,
+        "margin_reserved": margin_reserved,
+        "open_notional": open_notional,
+        "unrealized_pnl": unrealized,
+        "paper_equity": equity,
+        "realized_pnl": state.stats.simulated_pnl_usd,
+    }
+
+
 def analysis_key_for_timeframe(timeframe: str) -> str:
     return {
         "30M": "thirtym",
@@ -1828,14 +1865,20 @@ async def send_open_position_to_backend(position: Dict[str, Any]) -> None:
 def open_positions_snapshot() -> Dict[str, Any]:
     positions = []
     for position in active_positions():
+        unrealized = position_unrealized_pnl(position)
+        margin = position_margin(position)
         positions.append({
             "status": "OPEN",
             "symbol": position.get("symbol"),
             "entry_timeframe": position.get("entry_timeframe"),
             "side": position.get("side"),
             "entry_price": position.get("entry_price"),
+            "mark_price": position.get("last_mark_price", position.get("entry_price")),
             "position_size": position.get("position_size_btc"),
             "position_usd": position.get("position_usd"),
+            "margin_reserved": margin,
+            "unrealized_pnl": unrealized,
+            "unrealized_pnl_pct": (unrealized / margin * 100) if margin else 0.0,
             "stop_loss": position.get("stop_loss"),
             "take_profit": position.get("take_profit"),
             "leverage": position.get("leverage"),
@@ -1843,11 +1886,11 @@ def open_positions_snapshot() -> Dict[str, Any]:
             "opened_at": datetime.utcfromtimestamp(float(position.get("last_trade_ts", time.time()))).isoformat() + "Z",
             "reason": position.get("last_reason"),
         })
+    account = paper_account_summary()
     return {
         "open_positions": positions,
         "open_position": positions[0] if positions else {"status": "NONE"},
-        "paper_balance": DRY_RUN_BALANCE + state.stats.simulated_pnl_usd,
-        "realized_pnl": state.stats.simulated_pnl_usd,
+        **account,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -2137,6 +2180,7 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
         entry_timeframe = str(position.get("entry_timeframe", "1H")).upper()
         timeframe_analysis_data = analysis.get(analysis_key_for_timeframe(entry_timeframe)) or analysis.get("entry_analysis") or analysis.get("hourly", {})
         price = float(timeframe_analysis_data.get("price", analysis.get("price", 0.0)))
+        position["last_mark_price"] = price
         exit_reason = manage_open_position(price, timeframe_analysis_data)
         if exit_reason:
             order_side = "SELL" if state.side == "LONG" else "BUY"
@@ -2188,13 +2232,28 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
         return False
 
+    account = paper_account_summary() if DRY_RUN else {"available_balance": balance, "paper_balance": balance}
+    available_balance = float(account.get("available_balance", balance))
+    remaining_slots = max(MAX_OPEN_POSITIONS - len(active_positions()), 1)
+    sizing_balance = min(balance, available_balance / remaining_slots)
+    if sizing_balance < MIN_ORDER_USD:
+        logger.info(
+            "paper_balance_unavailable symbol=%s available=%.2f slot_balance=%.2f min=%.2f open_positions=%s",
+            symbol,
+            available_balance,
+            sizing_balance,
+            MIN_ORDER_USD,
+            len(active_positions()),
+        )
+        return False
+
     price = float(analysis.get("price", 0.0))
     entry_timeframe = str(analysis.get("entry_timeframe", "1H")).upper()
     entry_analysis = analysis.get("entry_analysis") or analysis.get("hourly", {})
     atr_used = float(analysis.get("atr", 0.0)) or float(entry_analysis.get("atr", 0.0))
     adx_used = float(entry_analysis.get("adx", 0.0))
     leverage_used = effective_leverage(adx_used)
-    size = calculate_position_size(balance, price, atr_used, adx_used)
+    size = calculate_position_size(sizing_balance, price, atr_used, adx_used)
     usd_size = size * price
     if usd_size < MIN_ORDER_USD:
         logger.info("position_size_below_min symbol=%s usd_size=%.2f min=%.2f", symbol, usd_size, MIN_ORDER_USD)
@@ -2237,6 +2296,7 @@ async def open_position_from_analysis(analysis: Dict[str, Any], balance: float, 
         "last_trade_ts": opened_at,
         "last_confidence": float(analysis.get("confidence", 0.0)),
         "last_reason": str(analysis.get("reason", "")),
+        "last_mark_price": price,
     }
     state.positions.append(position)
     state.daily_trades += 1
@@ -2333,7 +2393,9 @@ async def trading_loop(app: Optional[Application]) -> None:
                 if state.daily_trades >= MAX_TRADES_PER_DAY:
                     logger.info("daily_trade_limit_reached count=%s", state.daily_trades)
                     break
-                await open_position_from_analysis(candidate, balance, app)
+                account = paper_account_summary() if DRY_RUN else {"available_balance": get_usdc_balance()}
+                available_balance = float(account.get("available_balance", balance))
+                await open_position_from_analysis(candidate, available_balance, app)
         except Exception as exc:
             logger.exception("trading_loop_error error=%s", exc)
             await send_telegram(app, f"Error en bot:\n{str(exc)[:900]}")

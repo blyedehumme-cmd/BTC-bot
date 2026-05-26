@@ -91,8 +91,12 @@ type DecisionSnapshot = {
     entry_timeframe?: string;
     side?: string;
     entry_price?: number;
+    mark_price?: number;
     position_size?: number;
     position_usd?: number;
+    margin_reserved?: number;
+    unrealized_pnl?: number;
+    unrealized_pnl_pct?: number;
     stop_loss?: number;
     take_profit?: number;
     leverage?: number;
@@ -101,6 +105,14 @@ type DecisionSnapshot = {
     reason?: string;
   };
   open_positions?: NonNullable<DecisionSnapshot['open_position']>[];
+  paper_starting_balance?: number;
+  paper_balance?: number;
+  available_balance?: number;
+  margin_reserved?: number;
+  open_notional?: number;
+  unrealized_pnl?: number;
+  paper_equity?: number;
+  realized_pnl?: number;
 };
 
 function formatMoney(value?: number | null) {
@@ -172,6 +184,19 @@ function parseOpenPositionSnapshot(logs?: AiLog[] | null, crypto?: string): Deci
     try {
       const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
       if (snapshot.open_position?.status === 'OPEN' && (!crypto || matchesCrypto(snapshot.open_position.symbol, crypto))) return snapshot;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function parsePaperAccountSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
+  for (const log of logs ?? []) {
+    if (!log.condition_snapshot) continue;
+    try {
+      const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
+      if (Array.isArray(snapshot.open_positions) || typeof snapshot.paper_balance === 'number') return snapshot;
     } catch {
       continue;
     }
@@ -715,8 +740,13 @@ export default function PremiumDashboard() {
   const closedPaperEquity = paperStartingBalance * (1 + cumulativePnlPct / 100);
   const botActive = botControl?.active ?? true;
   const decisionSnapshot = useMemo(() => parseDecisionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
+  const paperAccountSnapshot = useMemo(() => parsePaperAccountSnapshot(aiLogs), [aiLogs]);
   const openPositionSnapshot = useMemo(() => parseOpenPositionSnapshot(aiLogs, selectedCrypto), [aiLogs, selectedCrypto]);
   const openPosition = openPositionSnapshot?.open_position?.status === 'OPEN' ? openPositionSnapshot.open_position : null;
+  const allOpenPositions = useMemo(
+    () => paperAccountSnapshot?.open_positions?.filter((position) => position.status === 'OPEN') ?? [],
+    [paperAccountSnapshot],
+  );
   const openPositionSymbol = openPosition?.symbol;
   const { data: openPositionLive } = usePolling<LiveMarket | null>(
     useCallback(() => {
@@ -730,7 +760,7 @@ export default function PremiumDashboard() {
   const openPositionMarkPrice = openPosition
     ? matchesCrypto(openPosition.symbol, selectedCrypto)
       ? price
-      : openPositionLive?.price ?? 0
+      : openPositionLive?.price ?? openPosition.mark_price ?? 0
     : 0;
   const openPositionNotional = openPosition?.position_usd ?? 0;
   const openPositionLeverage = openPosition?.leverage && openPosition.leverage > 0 ? openPosition.leverage : 1;
@@ -741,10 +771,15 @@ export default function PremiumDashboard() {
       : (openPositionMarkPrice - openPosition.entry_price) * openPosition.position_size
     : 0;
   const floatingPnlPct = marginReserved ? (floatingPnl / marginReserved) * 100 : 0;
-  const paperEquity = closedPaperEquity + floatingPnl;
-  const totalPaperPnlPct = ((paperEquity / paperStartingBalance) - 1) * 100;
-  const realizedPaperPnlPct = ((closedPaperEquity / paperStartingBalance) - 1) * 100;
-  const availablePaperBalance = Math.max(closedPaperEquity - marginReserved, 0);
+  const accountStartingBalance = paperAccountSnapshot?.paper_starting_balance ?? paperStartingBalance;
+  const accountClosedBalance = paperAccountSnapshot?.paper_balance ?? closedPaperEquity;
+  const accountFloatingPnl = paperAccountSnapshot?.unrealized_pnl ?? floatingPnl;
+  const accountPaperEquity = paperAccountSnapshot?.paper_equity ?? (closedPaperEquity + floatingPnl);
+  const accountMarginReserved = paperAccountSnapshot?.margin_reserved ?? marginReserved;
+  const accountOpenNotional = paperAccountSnapshot?.open_notional ?? openPositionNotional;
+  const accountAvailableBalance = paperAccountSnapshot?.available_balance ?? Math.max(closedPaperEquity - marginReserved, 0);
+  const totalPaperPnlPct = ((accountPaperEquity / accountStartingBalance) - 1) * 100;
+  const realizedPaperPnlPct = ((accountClosedBalance / accountStartingBalance) - 1) * 100;
   const riskAtStop = openPosition?.entry_price && openPosition?.stop_loss && openPosition?.position_size
     ? Math.abs(openPosition.entry_price - openPosition.stop_loss) * openPosition.position_size
     : 0;
@@ -794,9 +829,9 @@ export default function PremiumDashboard() {
           </header>
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Balance disponible" value={formatMoney(availablePaperBalance)} sub={openPosition ? `Reservado ${formatMoney(marginReserved)}` : 'sin margen reservado'} tone={availablePaperBalance >= paperStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(closedPaperEquity)} />
-            <MetricCard label="Equity papel" value={formatMoney(paperEquity)} sub={formatPct(totalPaperPnlPct)} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(paperStartingBalance)} />
-            <MetricCard label="P&L papel" value={formatPct(totalPaperPnlPct)} sub={openPosition ? `Flotante ${formatMoney(floatingPnl)}` : 'solo trades cerrados'} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
+            <MetricCard label="Balance disponible" value={formatMoney(accountAvailableBalance)} sub={allOpenPositions.length ? `Reservado ${formatMoney(accountMarginReserved)}` : 'sin margen reservado'} tone={accountAvailableBalance >= accountStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(accountClosedBalance)} />
+            <MetricCard label="Equity papel" value={formatMoney(accountPaperEquity)} sub={formatPct(totalPaperPnlPct)} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(accountStartingBalance)} />
+            <MetricCard label="P&L papel" value={formatPct(totalPaperPnlPct)} sub={allOpenPositions.length ? `Flotante ${formatMoney(accountFloatingPnl)}` : 'solo trades cerrados'} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
             <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
             <div className="space-y-2">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
@@ -912,12 +947,12 @@ export default function PremiumDashboard() {
               <div className="panel-head"><h2>Paper trading</h2><span>stats reales</span></div>
               <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {[
-                  ['Capital papel', formatMoney(closedPaperEquity), 'text-white'],
-                  ['Equity actual', formatMoney(paperEquity), totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
-                  ['Disponible', formatMoney(availablePaperBalance), 'text-emerald-300'],
-                  ['Margen reservado', formatMoney(marginReserved), openPosition ? 'text-amber-300' : 'text-slate-500'],
-                  ['Contrato abierto', formatMoney(openPositionNotional), openPosition ? 'text-cyan-300' : 'text-slate-500'],
-                  ['PnL flotante', `${formatMoney(floatingPnl)} · ${formatPct(floatingPnlPct)}`, floatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                  ['Capital papel', formatMoney(accountClosedBalance), 'text-white'],
+                  ['Equity actual', formatMoney(accountPaperEquity), totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                  ['Disponible', formatMoney(accountAvailableBalance), 'text-emerald-300'],
+                  ['Margen reservado', formatMoney(accountMarginReserved), allOpenPositions.length ? 'text-amber-300' : 'text-slate-500'],
+                  ['Contrato abierto', formatMoney(accountOpenNotional), allOpenPositions.length ? 'text-cyan-300' : 'text-slate-500'],
+                  ['PnL flotante', `${formatMoney(accountFloatingPnl)} · ${formatPct(totalPaperPnlPct)}`, accountFloatingPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'],
                   ['PnL realizado', formatPct(realizedPaperPnlPct), realizedPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'],
                   ['Precio posición', formatMoney(openPositionMarkPrice), openPosition ? 'text-white' : 'text-slate-500'],
                   ['Riesgo hasta SL', formatMoney(riskAtStop), openPosition ? 'text-rose-300' : 'text-slate-500'],
