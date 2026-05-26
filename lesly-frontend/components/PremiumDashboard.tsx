@@ -694,6 +694,9 @@ export default function PremiumDashboard() {
   const [closeActionMessage, setCloseActionMessage] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [paperPanelOpen, setPaperPanelOpen] = useState(false);
+  const [summaryPanelOpen, setSummaryPanelOpen] = useState(false);
+  const [marketPanelOpen, setMarketPanelOpen] = useState(false);
+  const [riskPanelOpen, setRiskPanelOpen] = useState(false);
   const liveNow = useLiveClock();
   const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe, selectedCrypto), [timeframe, selectedCrypto]), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
@@ -848,12 +851,50 @@ export default function PremiumDashboard() {
             </div>
           </header>
 
-          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Balance disponible" value={formatMoney(accountAvailableBalance)} sub={allOpenPositions.length ? `Reservado ${formatMoney(accountMarginReserved)}` : 'sin margen reservado'} tone={accountAvailableBalance >= accountStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(accountClosedBalance)} />
-            <MetricCard label="Equity papel" value={formatMoney(accountPaperEquity)} sub={formatPct(totalPaperPnlPct)} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(accountStartingBalance)} />
-            <MetricCard label="P&L papel" value={formatPct(totalPaperPnlPct)} sub={allOpenPositions.length ? `Flotante ${formatMoney(accountFloatingPnl)}` : 'solo trades cerrados'} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
-            <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
-            <div className="space-y-2">
+          <section className="grid gap-3 xl:grid-cols-[1fr_0.42fr]">
+            <div className="premium-card p-5">
+              <div className="panel-head">
+                <h2>Resumen principal</h2>
+                <button
+                  type="button"
+                  onClick={() => setSummaryPanelOpen((value) => !value)}
+                  className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-200 transition hover:border-cyan-200 hover:bg-cyan-300/20"
+                >
+                  {summaryPanelOpen ? 'ocultar' : 'ver todo'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSummaryPanelOpen((value) => !value)}
+                className="mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5 sm:grid-cols-4"
+              >
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Disponible</span>
+                  <span className="mt-1 block text-xl font-semibold text-white">{formatMoney(accountAvailableBalance)}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Equity</span>
+                  <span className={`mt-1 block text-xl font-semibold ${totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatMoney(accountPaperEquity)}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">P&L</span>
+                  <span className={`mt-1 block text-xl font-semibold ${totalPaperPnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatPct(totalPaperPnlPct)}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Señal</span>
+                  <span className={`mt-1 block text-xl font-semibold ${signalTone(signal)}`}>{signal}</span>
+                </span>
+              </button>
+              {summaryPanelOpen && (
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <MetricCard label="Balance disponible" value={formatMoney(accountAvailableBalance)} sub={allOpenPositions.length ? `Reservado ${formatMoney(accountMarginReserved)}` : 'sin margen reservado'} tone={accountAvailableBalance >= accountStartingBalance * 0.5 ? 'green' : 'red'} indicatorLabel="Capital" indicatorValue={formatMoney(accountClosedBalance)} />
+                  <MetricCard label="Equity papel" value={formatMoney(accountPaperEquity)} sub={formatPct(totalPaperPnlPct)} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Base" indicatorValue={formatMoney(accountStartingBalance)} />
+                  <MetricCard label="P&L papel" value={formatPct(totalPaperPnlPct)} sub={allOpenPositions.length ? `Flotante ${formatMoney(accountFloatingPnl)}` : 'solo trades cerrados'} tone={totalPaperPnlPct >= 0 ? 'green' : 'red'} indicatorLabel="Trades" indicatorValue={String(performance?.total_trades ?? 0)} />
+                  <MetricCard label="Riesgo actual" value={String(risk).toUpperCase()} sub={`Confianza ${confidence}%`} tone={String(risk).toLowerCase().includes('high') ? 'red' : 'green'} indicatorLabel="Señal" indicatorValue={signal} />
+                </div>
+              )}
+            </div>
+            <div className="premium-card space-y-2 p-4">
               <ControlButtons botActive={botActive} busy={botActionBusy} onStart={() => runBotAction('start')} onStop={() => runBotAction('stop')} />
               <p className={`px-2 text-xs ${botActive ? 'text-emerald-300' : 'text-rose-300'}`}>
                 {botActionMessage || (botActive ? 'Bot activo: puede abrir operaciones paper.' : 'Bot pausado: no abrirá nuevas operaciones.')} · NY {formatNewYorkTime(liveNow)}
@@ -885,19 +926,48 @@ export default function PremiumDashboard() {
             </div>
 
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Snapshot de mercado</h2><span>{formatNewYorkTime(live?.updated_at ?? snapshot?.updated_at)}</span></div>
-              <div className="divide-y divide-cyan-400/10">
-                {[
-                  [`Precio ${live?.asset ?? selectedCrypto}`, formatMoney(price), 'text-emerald-300'],
-                  ['Cambio 1H', formatPct(live?.change_1h_pct), (live?.change_1h_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'],
-                  ['Soporte', formatMoney(support), 'text-cyan-300'],
-                  ['Resistencia', formatMoney(resistance), 'text-rose-300'],
-                  ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral', 'text-emerald-300'],
-                  ['Exchange', live?.exchange ? live.exchange.toUpperCase() : 'fallback', 'text-cyan-300'],
-                ].map(([label, value, className]) => (
-                  <div key={label} className="flex items-center justify-between py-4 text-sm"><span className="text-slate-400">{label}</span><strong className={className}>{value}</strong></div>
-                ))}
+              <div className="panel-head">
+                <h2>Snapshot de mercado</h2>
+                <button
+                  type="button"
+                  onClick={() => setMarketPanelOpen((value) => !value)}
+                  className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-200 transition hover:border-cyan-200 hover:bg-cyan-300/20"
+                >
+                  {marketPanelOpen ? 'ocultar' : formatNewYorkTime(live?.updated_at ?? snapshot?.updated_at)}
+                </button>
               </div>
+              <button
+                type="button"
+                onClick={() => setMarketPanelOpen((value) => !value)}
+                className="mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5"
+              >
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Precio {live?.asset ?? selectedCrypto}</span>
+                  <span className="mt-1 block text-2xl font-semibold text-emerald-300">{formatMoney(price)}</span>
+                </span>
+                <span className="flex items-center justify-between gap-4 text-sm">
+                  <span className="text-slate-400">Cambio 1H</span>
+                  <strong className={(live?.change_1h_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatPct(live?.change_1h_pct)}</strong>
+                </span>
+                <span className="flex items-center justify-between gap-4 text-sm">
+                  <span className="text-slate-400">Tendencia</span>
+                  <strong className="text-emerald-300">{live?.trend ?? snapshot?.trend ?? 'neutral'}</strong>
+                </span>
+              </button>
+              {marketPanelOpen && (
+                <div className="mt-4 divide-y divide-cyan-400/10">
+                  {[
+                    [`Precio ${live?.asset ?? selectedCrypto}`, formatMoney(price), 'text-emerald-300'],
+                    ['Cambio 1H', formatPct(live?.change_1h_pct), (live?.change_1h_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'],
+                    ['Soporte', formatMoney(support), 'text-cyan-300'],
+                    ['Resistencia', formatMoney(resistance), 'text-rose-300'],
+                    ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral', 'text-emerald-300'],
+                    ['Exchange', live?.exchange ? live.exchange.toUpperCase() : 'fallback', 'text-cyan-300'],
+                  ].map(([label, value, className]) => (
+                    <div key={label} className="flex items-center justify-between py-4 text-sm"><span className="text-slate-400">{label}</span><strong className={className}>{value}</strong></div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <SystemStatus aiStatus={aiStatus} />
@@ -906,23 +976,54 @@ export default function PremiumDashboard() {
           <section id="riesgo" className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
             <StrategyMatrix checks={strategyChecks} blockedReasons={blockedReasons} />
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>Control de riesgo</h2><span>paper safe</span></div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[
-                  ['ATR real', liveTelemetry.atr ? number.format(liveTelemetry.atr) : 'Esperando exchange', 'text-cyan-300'],
-                  [`ADX ${timeframe}`, liveTelemetry.adx ? number.format(liveTelemetry.adx) : 'Esperando exchange', 'text-emerald-300'],
-                  ['Volumen', liveTelemetry.volumeRatio ? `${liveTelemetry.volumeRatio.toFixed(2)}x` : 'Esperando exchange', 'text-cyan-300'],
-                  ['Volatilidad', liveTelemetry.volatilityRatio ? `${liveTelemetry.volatilityRatio.toFixed(2)} ATR` : liveTelemetry.volume ? number.format(liveTelemetry.volume) : 'Esperando exchange', 'text-amber-300'],
-                ].map(([label, value, className]) => (
-                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-                    <p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p>
+              <div className="panel-head">
+                <h2>Control de riesgo</h2>
+                <button
+                  type="button"
+                  onClick={() => setRiskPanelOpen((value) => !value)}
+                  className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-200 transition hover:border-cyan-200 hover:bg-cyan-300/20"
+                >
+                  {riskPanelOpen ? 'ocultar' : 'paper safe'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRiskPanelOpen((value) => !value)}
+                className="mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5 sm:grid-cols-3"
+              >
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">ADX {timeframe}</span>
+                  <span className="mt-1 block text-xl font-semibold text-emerald-300">{liveTelemetry.adx ? number.format(liveTelemetry.adx) : '—'}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Volumen</span>
+                  <span className="mt-1 block text-xl font-semibold text-cyan-300">{liveTelemetry.volumeRatio ? `${liveTelemetry.volumeRatio.toFixed(2)}x` : '—'}</span>
+                </span>
+                <span>
+                  <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">ATR</span>
+                  <span className="mt-1 block text-xl font-semibold text-cyan-300">{liveTelemetry.atr ? number.format(liveTelemetry.atr) : '—'}</span>
+                </span>
+              </button>
+              {riskPanelOpen && (
+                <div className="mt-4 space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ['ATR real', liveTelemetry.atr ? number.format(liveTelemetry.atr) : 'Esperando exchange', 'text-cyan-300'],
+                      [`ADX ${timeframe}`, liveTelemetry.adx ? number.format(liveTelemetry.adx) : 'Esperando exchange', 'text-emerald-300'],
+                      ['Volumen', liveTelemetry.volumeRatio ? `${liveTelemetry.volumeRatio.toFixed(2)}x` : 'Esperando exchange', 'text-cyan-300'],
+                      ['Volatilidad', liveTelemetry.volatilityRatio ? `${liveTelemetry.volatilityRatio.toFixed(2)} ATR` : liveTelemetry.volume ? number.format(liveTelemetry.volume) : 'Esperando exchange', 'text-amber-300'],
+                    ].map(([label, value, className]) => (
+                      <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                        <p className={`mt-2 text-2xl font-semibold ${className}`}>{value}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="mt-4 rounded-2xl border border-cyan-400/10 bg-black/25 p-4 text-sm text-slate-300">
-                <p>Entradas solo con vela cerrada, confirmación 1D/4H/1H, ADX y volumen obligatorios.</p>
-              </div>
+                  <div className="rounded-2xl border border-cyan-400/10 bg-black/25 p-4 text-sm text-slate-300">
+                    <p>Entradas solo con vela cerrada, confirmación 1D/4H/1H, ADX y volumen obligatorios.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 
