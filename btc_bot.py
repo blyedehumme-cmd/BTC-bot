@@ -602,6 +602,22 @@ async def sync_bot_control_from_backend() -> None:
         logger.info("bot_control_synced active=%s source=backend mode=%s", active, payload.get("mode"))
 
 
+async def sync_worker_runtime_from_backend() -> Dict[str, Any]:
+    if not BACKEND_API_URL:
+        return {"worker_should_run": True, "active_profiles": []}
+    payload = await asyncio.to_thread(lambda: _get_json_from_backend("bot/worker-runtime"))
+    if not isinstance(payload, dict):
+        return {"worker_should_run": True, "active_profiles": []}
+    profiles = payload.get("active_profiles") if isinstance(payload.get("active_profiles"), list) else []
+    should_run = bool(payload.get("worker_should_run", False))
+    if not should_run and not active_positions():
+        if state.active:
+            state.active = False
+            save_state()
+        logger.info("worker_runtime no_active_user_profiles=true")
+    return {"worker_should_run": should_run, "active_profiles": profiles}
+
+
 def _parse_backend_timestamp(value: Any) -> float:
     if not value:
         return 0.0
@@ -2492,6 +2508,8 @@ async def trading_loop(app: Optional[Application]) -> None:
             price = float(analysis.get("price", 0.0))
             reset_daily_balance_if_needed(balance)
             await sync_bot_control_from_backend()
+            worker_runtime = await sync_worker_runtime_from_backend()
+            worker_user_enabled = bool(worker_runtime.get("worker_should_run", True))
 
             state.last_signal = analysis.get("signal", "WAIT")
             state.last_confidence = float(analysis.get("confidence", 0.0))
@@ -2523,6 +2541,9 @@ async def trading_loop(app: Optional[Application]) -> None:
                 reverse=True,
             )
             opened_position_this_cycle = False
+            if not worker_user_enabled:
+                logger.info("entries_blocked reason=no_active_user_profiles")
+                actionable = []
             for candidate in actionable:
                 if len(active_positions()) >= MAX_OPEN_POSITIONS:
                     break

@@ -108,6 +108,14 @@ async def test_register_login_and_exchange_account(client):
     assert reset_payload['account']['cash_balance'] == 7500.0
     assert reset_payload['latest_events'][0]['event_type'] == 'paper_runtime_reset'
 
+    worker_runtime = await client.get('/api/bot/worker-runtime')
+    assert worker_runtime.status_code == 200
+    worker_payload = worker_runtime.json()
+    assert worker_payload['worker_should_run'] is True
+    assert worker_payload['active_profiles_count'] == 1
+    assert worker_payload['active_profiles'][0]['user_id'] == register.json()['user']['id']
+    assert worker_payload['active_profiles'][0]['symbols'] == ['BTC']
+
     worker_status = await client.post(
         '/api/ai/decisions',
         json={

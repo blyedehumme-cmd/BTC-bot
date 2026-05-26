@@ -3,8 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.db.database import get_db
-from app.schemas.schemas import BotControlResponse
+from app.schemas.schemas import BotControlResponse, WorkerRuntimeResponse
 from app.services.bot_control import get_bot_control, request_manual_close, request_stop_loss_update, set_bot_active
+from app.services.user_runtime import build_worker_runtime
 
 router = APIRouter()
 
@@ -22,6 +23,12 @@ class StopLossUpdateRequest(BaseModel):
 @router.get('/status/', response_model=BotControlResponse)
 async def bot_status(db: AsyncSession = Depends(get_db)):
     return await get_bot_control(db)
+
+
+@router.get('/worker-runtime', response_model=WorkerRuntimeResponse)
+@router.get('/worker-runtime/', response_model=WorkerRuntimeResponse)
+async def worker_runtime(db: AsyncSession = Depends(get_db)):
+    return await build_worker_runtime(db)
 
 
 @router.post('/start', response_model=BotControlResponse)

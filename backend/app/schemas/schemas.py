@@ -294,3 +294,22 @@ class UserPaperRuntimeResponse(BaseModel):
     active_symbols: list[str]
     open_positions_count: int
     max_open_positions: int
+
+
+class WorkerUserProfileResponse(BaseModel):
+    user_id: int
+    active: bool
+    mode: str
+    selected_exchange: str
+    symbols: list[str]
+    paper_balance: float
+    max_open_positions: int
+    risk_profile: str
+    exchange_ready: bool
+    open_positions_count: int
+
+
+class WorkerRuntimeResponse(BaseModel):
+    active_profiles: list[WorkerUserProfileResponse]
+    active_profiles_count: int
+    worker_should_run: bool

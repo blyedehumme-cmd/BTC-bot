@@ -21,6 +21,8 @@ from app.schemas.schemas import (
     UserPaperAccountResponse,
     UserPaperPositionResponse,
     UserPaperRuntimeResponse,
+    WorkerRuntimeResponse,
+    WorkerUserProfileResponse,
 )
 
 
@@ -236,16 +238,39 @@ async def select_global_worker_user(db: AsyncSession) -> tuple[User, UserBotSett
     )
     row = result.first()
     if row is None:
-        fallback = await db.execute(
-            select(User, UserBotSettings)
-            .join(UserBotSettings, UserBotSettings.user_id == User.id)
-            .where(User.is_active.is_(True))
-            .order_by(User.created_at.asc())
-        )
-        row = fallback.first()
-    if row is None:
         return None
     return row[0], row[1]
+
+
+async def build_worker_runtime(db: AsyncSession) -> WorkerRuntimeResponse:
+    result = await db.execute(
+        select(User, UserBotSettings)
+        .join(UserBotSettings, UserBotSettings.user_id == User.id)
+        .where(User.is_active.is_(True), UserBotSettings.active.is_(True), UserBotSettings.mode == 'DRY_RUN')
+        .order_by(UserBotSettings.updated_at.desc())
+    )
+    profiles: list[WorkerUserProfileResponse] = []
+    for user, settings in result.all():
+        runtime = await build_user_runtime_snapshot(user, settings, db)
+        profiles.append(
+            WorkerUserProfileResponse(
+                user_id=user.id,
+                active=settings.active,
+                mode=settings.mode,
+                selected_exchange=settings.selected_exchange,
+                symbols=runtime.active_symbols,
+                paper_balance=settings.paper_balance,
+                max_open_positions=settings.max_open_positions,
+                risk_profile=settings.risk_profile,
+                exchange_ready=runtime.exchange_ready,
+                open_positions_count=runtime.open_positions_count,
+            )
+        )
+    return WorkerRuntimeResponse(
+        active_profiles=profiles,
+        active_profiles_count=len(profiles),
+        worker_should_run=len(profiles) > 0,
+    )
 
 
 def _safe_json_loads(raw: str | None) -> dict[str, Any]:
