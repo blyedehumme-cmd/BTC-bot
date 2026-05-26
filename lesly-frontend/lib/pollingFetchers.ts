@@ -1,4 +1,4 @@
-import { fetchJson, postJson } from './usePolling';
+import { fetchJson, postJson, putJson } from './usePolling';
 
 export type Signal = {
   id: number;
@@ -172,6 +172,51 @@ export type UserBotSettings = {
   updated_at: string;
 };
 
+export type UserPaperRuntime = {
+  account: {
+    starting_balance: number;
+    cash_balance: number;
+    equity: number;
+    realized_pnl: number;
+    unrealized_pnl: number;
+    margin_reserved: number;
+    open_notional: number;
+    updated_at: string;
+  };
+  open_positions: Array<{
+    id: number;
+    symbol: string;
+    side: string;
+    timeframe: string;
+    entry_price: number;
+    mark_price: number;
+    size: number;
+    notional: number;
+    margin_reserved: number;
+    stop_loss: number | null;
+    take_profit: number | null;
+    leverage: number;
+    status: string;
+    opened_at: string;
+    updated_at: string;
+  }>;
+  latest_events: Array<{
+    id: number;
+    event_type: string;
+    severity: string;
+    message: string;
+    detail: string | null;
+    payload: string | null;
+    created_at: string;
+  }>;
+  bot_settings: UserBotSettings;
+  exchange_ready: boolean;
+  active_exchange: string;
+  active_symbols: string[];
+  open_positions_count: number;
+  max_open_positions: number;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -195,6 +240,7 @@ export const loginUser = (payload: { email: string; password: string }) => postJ
 export const fetchCurrentUser = () => fetchJson<LeslyUser>('/auth/me');
 export const fetchExchangeAccounts = () => fetchJson<ExchangeAccount[]>('/auth/exchange-accounts');
 export const fetchUserBotSettings = () => fetchJson<UserBotSettings>('/auth/bot-settings');
+export const fetchUserPaperRuntime = () => fetchJson<UserPaperRuntime>('/auth/paper-runtime');
 export const saveExchangeAccount = (payload: {
   exchange: string;
   api_key: string;
@@ -204,5 +250,6 @@ export const saveExchangeAccount = (payload: {
   dry_run?: boolean;
 }) => postJson<ExchangeAccount>('/auth/exchange-accounts', payload);
 export const saveUserBotSettings = (payload: Partial<UserBotSettings>) => (
-  postJson<UserBotSettings>('/auth/bot-settings', payload)
+  putJson<UserBotSettings>('/auth/bot-settings', payload)
 );
+export const resetUserPaperRuntime = () => postJson<UserPaperRuntime>('/auth/paper-runtime/reset');

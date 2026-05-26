@@ -126,6 +126,9 @@ class User(Base):
 
     exchange_accounts = relationship('UserExchangeAccount', back_populates='user', cascade='all, delete-orphan')
     bot_settings = relationship('UserBotSettings', back_populates='user', cascade='all, delete-orphan', uselist=False)
+    paper_account = relationship('UserPaperAccount', back_populates='user', cascade='all, delete-orphan', uselist=False)
+    paper_positions = relationship('UserPaperPosition', back_populates='user', cascade='all, delete-orphan')
+    bot_events = relationship('UserBotEvent', back_populates='user', cascade='all, delete-orphan')
 
 
 class UserExchangeAccount(Base):
@@ -164,3 +167,63 @@ class UserBotSettings(Base):
     updated_at = Column(DateTime, nullable=False)
 
     user = relationship('User', back_populates='bot_settings')
+
+
+class UserPaperAccount(Base):
+    __tablename__ = 'user_paper_accounts'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    starting_balance = Column(Float, nullable=False, default=5000.0)
+    cash_balance = Column(Float, nullable=False, default=5000.0)
+    equity = Column(Float, nullable=False, default=5000.0)
+    realized_pnl = Column(Float, nullable=False, default=0.0)
+    unrealized_pnl = Column(Float, nullable=False, default=0.0)
+    margin_reserved = Column(Float, nullable=False, default=0.0)
+    open_notional = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    user = relationship('User', back_populates='paper_account')
+
+
+class UserPaperPosition(Base):
+    __tablename__ = 'user_paper_positions'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    symbol = Column(String(length=24), nullable=False, index=True)
+    side = Column(String(length=16), nullable=False)
+    timeframe = Column(String(length=16), nullable=False)
+    entry_price = Column(Float, nullable=False)
+    mark_price = Column(Float, nullable=False)
+    size = Column(Float, nullable=False)
+    notional = Column(Float, nullable=False)
+    margin_reserved = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=True)
+    take_profit = Column(Float, nullable=True)
+    leverage = Column(Float, nullable=False, default=1.0)
+    status = Column(String(length=24), nullable=False, default='OPEN')
+    opened_at = Column(DateTime, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+    close_reason = Column(String(length=80), nullable=True)
+    realized_pnl = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    user = relationship('User', back_populates='paper_positions')
+
+
+class UserBotEvent(Base):
+    __tablename__ = 'user_bot_events'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    event_type = Column(String(length=64), nullable=False)
+    severity = Column(String(length=24), nullable=False, default='info')
+    message = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)
+    payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+    user = relationship('User', back_populates='bot_events')

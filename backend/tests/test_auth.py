@@ -91,6 +91,22 @@ async def test_register_login_and_exchange_account(client):
     assert updated_payload['paper_balance'] == 7500
     assert updated_payload['max_open_positions'] == 1
 
+    runtime = await client.get('/api/auth/paper-runtime', headers={'Authorization': f'Bearer {token}'})
+    assert runtime.status_code == 200
+    runtime_payload = runtime.json()
+    assert runtime_payload['account']['starting_balance'] == 7500.0
+    assert runtime_payload['account']['equity'] == 7500.0
+    assert runtime_payload['active_exchange'] == 'okx'
+    assert runtime_payload['active_symbols'] == ['BTC']
+    assert runtime_payload['exchange_ready'] is True
+    assert runtime_payload['open_positions_count'] == 0
+
+    reset_runtime = await client.post('/api/auth/paper-runtime/reset', headers={'Authorization': f'Bearer {token}'})
+    assert reset_runtime.status_code == 200
+    reset_payload = reset_runtime.json()
+    assert reset_payload['account']['cash_balance'] == 7500.0
+    assert reset_payload['latest_events'][0]['event_type'] == 'paper_runtime_reset'
+
     login = await client.post('/api/auth/login', json={
         'email': email,
         'password': 'super-secret-123',

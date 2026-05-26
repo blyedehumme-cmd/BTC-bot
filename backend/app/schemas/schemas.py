@@ -243,3 +243,54 @@ class UserBotSettingsResponse(BaseModel):
     max_open_positions: int
     risk_profile: str
     updated_at: datetime
+
+
+class UserPaperAccountResponse(BaseModel):
+    starting_balance: float
+    cash_balance: float
+    equity: float
+    realized_pnl: float
+    unrealized_pnl: float
+    margin_reserved: float
+    open_notional: float
+    updated_at: datetime
+
+
+class UserPaperPositionResponse(BaseModel):
+    id: int
+    symbol: str
+    side: str
+    timeframe: str
+    entry_price: float
+    mark_price: float
+    size: float
+    notional: float
+    margin_reserved: float
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    leverage: float
+    status: str
+    opened_at: datetime
+    updated_at: datetime
+
+
+class UserBotEventResponse(BaseModel):
+    id: int
+    event_type: str
+    severity: str
+    message: str
+    detail: Optional[str] = None
+    payload: Optional[str] = None
+    created_at: datetime
+
+
+class UserPaperRuntimeResponse(BaseModel):
+    account: UserPaperAccountResponse
+    open_positions: list[UserPaperPositionResponse]
+    latest_events: list[UserBotEventResponse]
+    bot_settings: UserBotSettingsResponse
+    exchange_ready: bool
+    active_exchange: str
+    active_symbols: list[str]
+    open_positions_count: int
+    max_open_positions: int

@@ -5,13 +5,16 @@ import {
   fetchCurrentUser,
   fetchExchangeAccounts,
   fetchUserBotSettings,
+  fetchUserPaperRuntime,
   loginUser,
   registerUser,
+  resetUserPaperRuntime,
   saveExchangeAccount,
   saveUserBotSettings,
   type ExchangeAccount,
   type LeslyUser,
   type UserBotSettings,
+  type UserPaperRuntime,
 } from '../lib/pollingFetchers';
 
 type Props = {
@@ -23,6 +26,7 @@ export default function AuthGate({ children }: Props) {
   const [user, setUser] = useState<LeslyUser | null>(null);
   const [accounts, setAccounts] = useState<ExchangeAccount[]>([]);
   const [botSettings, setBotSettings] = useState<UserBotSettings | null>(null);
+  const [paperRuntime, setPaperRuntime] = useState<UserPaperRuntime | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -30,10 +34,16 @@ export default function AuthGate({ children }: Props) {
   const [showBotForm, setShowBotForm] = useState(false);
 
   const refreshAccount = useCallback(async () => {
-    const [currentUser, exchangeAccounts, settings] = await Promise.all([fetchCurrentUser(), fetchExchangeAccounts(), fetchUserBotSettings()]);
+    const [currentUser, exchangeAccounts, settings, runtime] = await Promise.all([
+      fetchCurrentUser(),
+      fetchExchangeAccounts(),
+      fetchUserBotSettings(),
+      fetchUserPaperRuntime(),
+    ]);
     setUser(currentUser);
     setAccounts(exchangeAccounts);
     setBotSettings(settings);
+    setPaperRuntime(runtime);
   }, []);
 
   useEffect(() => {
@@ -67,9 +77,10 @@ export default function AuthGate({ children }: Props) {
         : await loginUser(payload);
       window.localStorage.setItem('lesly_access_token', response.access_token);
       setUser(response.user);
-      const [exchangeAccounts, settings] = await Promise.all([fetchExchangeAccounts(), fetchUserBotSettings()]);
+      const [exchangeAccounts, settings, runtime] = await Promise.all([fetchExchangeAccounts(), fetchUserBotSettings(), fetchUserPaperRuntime()]);
       setAccounts(exchangeAccounts);
       setBotSettings(settings);
+      setPaperRuntime(runtime);
       setMessage('Sesión iniciada. Lesly queda en modo paper por defecto.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
@@ -92,7 +103,9 @@ export default function AuthGate({ children }: Props) {
         account_label: 'main',
         dry_run: true,
       });
-      setAccounts(await fetchExchangeAccounts());
+      const [exchangeAccounts, runtime] = await Promise.all([fetchExchangeAccounts(), fetchUserPaperRuntime()]);
+      setAccounts(exchangeAccounts);
+      setPaperRuntime(runtime);
       setShowAccountForm(false);
       setMessage('Credenciales guardadas cifradas. Siguen en DRY_RUN hasta activarlo manualmente.');
     } catch (error) {
@@ -117,6 +130,7 @@ export default function AuthGate({ children }: Props) {
         risk_profile: String(form.get('risk_profile') ?? 'balanced'),
       });
       setBotSettings(settings);
+      setPaperRuntime(await fetchUserPaperRuntime());
       setShowBotForm(false);
       setMessage('Perfil paper del usuario actualizado.');
     } catch (error) {
@@ -131,7 +145,24 @@ export default function AuthGate({ children }: Props) {
     setUser(null);
     setAccounts([]);
     setBotSettings(null);
+    setPaperRuntime(null);
   }
+
+  async function resetRuntime() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const runtime = await resetUserPaperRuntime();
+      setPaperRuntime(runtime);
+      setMessage('Runtime paper reiniciado para esta cuenta.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo reiniciar el runtime paper.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const money = (value: number | undefined) => `$${(value ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) {
     return <div className="min-h-screen bg-[#020712] p-6 text-cyan-100">Cargando sesión de Lesly...</div>;
@@ -172,6 +203,9 @@ export default function AuthGate({ children }: Props) {
         <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3">
           <span>{user.name} · {user.email} · Paper trading</span>
           <div className="flex items-center gap-2">
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
+              {paperRuntime ? `${paperRuntime.open_positions_count}/${paperRuntime.max_open_positions} abiertas · ${money(paperRuntime.account.equity)}` : 'Runtime paper'}
+            </span>
             <button className="rounded-full border border-cyan-400/25 px-4 py-2 text-xs uppercase tracking-[0.16em]" onClick={() => setShowAccountForm(!showAccountForm)}>
               Exchange
             </button>
@@ -232,9 +266,36 @@ export default function AuthGate({ children }: Props) {
             </label>
             <button className="rounded-2xl bg-cyan-400 px-3 py-3 font-black uppercase tracking-[0.14em] text-slate-950 md:col-span-2" disabled={busy}>Guardar perfil</button>
             <p className="md:col-span-6 text-xs text-slate-400">
-              Este perfil separa configuración por usuario. La ejecución multiusuario del worker se conectará en la próxima fase.
+              Este perfil separa configuración por usuario. El runtime paper propio ya está preparado; la ejecución multiusuario del worker se conectará en la próxima fase.
             </p>
           </form>
+        )}
+        {paperRuntime && (
+          <section className="mx-auto mt-4 grid max-w-[1500px] gap-3 rounded-3xl border border-cyan-400/20 bg-black/30 p-4 text-xs md:grid-cols-6">
+            <div>
+              <p className="uppercase tracking-[0.22em] text-slate-500">Exchange</p>
+              <p className="mt-1 font-bold text-cyan-100">{paperRuntime.active_exchange.toUpperCase()} · {paperRuntime.exchange_ready ? 'conectado' : 'sin API'}</p>
+            </div>
+            <div>
+              <p className="uppercase tracking-[0.22em] text-slate-500">Símbolos</p>
+              <p className="mt-1 font-bold text-cyan-100">{paperRuntime.active_symbols.join(', ')}</p>
+            </div>
+            <div>
+              <p className="uppercase tracking-[0.22em] text-slate-500">Disponible</p>
+              <p className="mt-1 font-bold text-emerald-200">{money(paperRuntime.account.cash_balance)}</p>
+            </div>
+            <div>
+              <p className="uppercase tracking-[0.22em] text-slate-500">Margen</p>
+              <p className="mt-1 font-bold text-amber-200">{money(paperRuntime.account.margin_reserved)}</p>
+            </div>
+            <div>
+              <p className="uppercase tracking-[0.22em] text-slate-500">Último evento</p>
+              <p className="mt-1 truncate font-bold text-cyan-100">{paperRuntime.latest_events[0]?.message ?? 'Sin eventos propios todavía.'}</p>
+            </div>
+            <button className="rounded-2xl border border-amber-300/30 px-3 py-3 font-black uppercase tracking-[0.14em] text-amber-100 disabled:opacity-50" onClick={resetRuntime} disabled={busy}>
+              Reset paper
+            </button>
+          </section>
         )}
         {message && <p className="mx-auto mt-3 max-w-[1500px] text-xs text-cyan-200">{message}</p>}
       </div>

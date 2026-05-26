@@ -49,8 +49,16 @@ export async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export async function postJson<T>(path: string, payload: unknown = {}): Promise<T> {
+  return requestJson<T>('POST', path, payload);
+}
+
+export async function putJson<T>(path: string, payload: unknown = {}): Promise<T> {
+  return requestJson<T>('PUT', path, payload);
+}
+
+async function requestJson<T>(method: 'POST' | 'PUT', path: string, payload: unknown = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });

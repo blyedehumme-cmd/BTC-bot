@@ -16,6 +16,7 @@ from app.schemas.schemas import (
     UserRegisterRequest,
     UserBotSettingsResponse,
     UserBotSettingsUpdate,
+    UserPaperRuntimeResponse,
     UserResponse,
 )
 from app.services.auth_service import (
@@ -30,6 +31,7 @@ from app.services.auth_service import (
     validate_password,
     verify_password,
 )
+from app.services.user_runtime import build_user_runtime_snapshot, reset_user_paper_runtime
 
 router = APIRouter()
 
@@ -244,3 +246,22 @@ async def update_user_bot_settings(
     await db.commit()
     await db.refresh(settings)
     return bot_settings_response(settings)
+
+
+@router.get('/paper-runtime', response_model=UserPaperRuntimeResponse)
+async def get_user_paper_runtime(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await get_or_create_bot_settings(current_user, db)
+    return await build_user_runtime_snapshot(current_user, settings, db)
+
+
+@router.post('/paper-runtime/reset', response_model=UserPaperRuntimeResponse)
+async def reset_paper_runtime(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await get_or_create_bot_settings(current_user, db)
+    await reset_user_paper_runtime(current_user, settings, db)
+    return await build_user_runtime_snapshot(current_user, settings, db)
