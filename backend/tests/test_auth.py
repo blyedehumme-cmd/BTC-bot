@@ -112,9 +112,11 @@ async def test_register_login_and_exchange_account(client):
     assert worker_runtime.status_code == 200
     worker_payload = worker_runtime.json()
     assert worker_payload['worker_should_run'] is True
+    assert worker_payload['worker_should_open_entries'] is True
     assert worker_payload['active_profiles_count'] == 1
     assert worker_payload['active_profiles'][0]['user_id'] == register.json()['user']['id']
     assert worker_payload['active_profiles'][0]['symbols'] == ['BTC']
+    assert worker_payload['active_profiles'][0]['can_open_new_positions'] is True
 
     worker_status = await client.post(
         '/api/ai/decisions',

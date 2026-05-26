@@ -610,12 +610,13 @@ async def sync_worker_runtime_from_backend() -> Dict[str, Any]:
         return {"worker_should_run": True, "active_profiles": []}
     profiles = payload.get("active_profiles") if isinstance(payload.get("active_profiles"), list) else []
     should_run = bool(payload.get("worker_should_run", False))
+    should_open_entries = bool(payload.get("worker_should_open_entries", should_run))
     if not should_run and not active_positions():
         if state.active:
             state.active = False
             save_state()
         logger.info("worker_runtime no_active_user_profiles=true")
-    return {"worker_should_run": should_run, "active_profiles": profiles}
+    return {"worker_should_run": should_run, "worker_should_open_entries": should_open_entries, "active_profiles": profiles}
 
 
 def _parse_backend_timestamp(value: Any) -> float:
@@ -2509,7 +2510,7 @@ async def trading_loop(app: Optional[Application]) -> None:
             reset_daily_balance_if_needed(balance)
             await sync_bot_control_from_backend()
             worker_runtime = await sync_worker_runtime_from_backend()
-            worker_user_enabled = bool(worker_runtime.get("worker_should_run", True))
+            worker_user_enabled = bool(worker_runtime.get("worker_should_open_entries", worker_runtime.get("worker_should_run", True)))
 
             state.last_signal = analysis.get("signal", "WAIT")
             state.last_confidence = float(analysis.get("confidence", 0.0))

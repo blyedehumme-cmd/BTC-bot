@@ -307,9 +307,11 @@ class WorkerUserProfileResponse(BaseModel):
     risk_profile: str
     exchange_ready: bool
     open_positions_count: int
+    can_open_new_positions: bool
 
 
 class WorkerRuntimeResponse(BaseModel):
     active_profiles: list[WorkerUserProfileResponse]
     active_profiles_count: int
     worker_should_run: bool
+    worker_should_open_entries: bool

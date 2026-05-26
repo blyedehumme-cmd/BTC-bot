@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
@@ -230,10 +230,14 @@ async def build_user_runtime_snapshot(
 
 
 async def select_global_worker_user(db: AsyncSession) -> tuple[User, UserBotSettings] | None:
+    has_open_position = exists().where(
+        UserPaperPosition.user_id == User.id,
+        UserPaperPosition.status == 'OPEN',
+    )
     result = await db.execute(
         select(User, UserBotSettings)
         .join(UserBotSettings, UserBotSettings.user_id == User.id)
-        .where(User.is_active.is_(True), UserBotSettings.active.is_(True))
+        .where(User.is_active.is_(True), or_(UserBotSettings.active.is_(True), has_open_position))
         .order_by(UserBotSettings.updated_at.desc())
     )
     row = result.first()
@@ -243,10 +247,18 @@ async def select_global_worker_user(db: AsyncSession) -> tuple[User, UserBotSett
 
 
 async def build_worker_runtime(db: AsyncSession) -> WorkerRuntimeResponse:
+    has_open_position = exists().where(
+        UserPaperPosition.user_id == User.id,
+        UserPaperPosition.status == 'OPEN',
+    )
     result = await db.execute(
         select(User, UserBotSettings)
         .join(UserBotSettings, UserBotSettings.user_id == User.id)
-        .where(User.is_active.is_(True), UserBotSettings.active.is_(True), UserBotSettings.mode == 'DRY_RUN')
+        .where(
+            User.is_active.is_(True),
+            UserBotSettings.mode == 'DRY_RUN',
+            or_(UserBotSettings.active.is_(True), has_open_position),
+        )
         .order_by(UserBotSettings.updated_at.desc())
     )
     profiles: list[WorkerUserProfileResponse] = []
@@ -264,12 +276,14 @@ async def build_worker_runtime(db: AsyncSession) -> WorkerRuntimeResponse:
                 risk_profile=settings.risk_profile,
                 exchange_ready=runtime.exchange_ready,
                 open_positions_count=runtime.open_positions_count,
+                can_open_new_positions=bool(settings.active),
             )
         )
     return WorkerRuntimeResponse(
         active_profiles=profiles,
         active_profiles_count=len(profiles),
         worker_should_run=len(profiles) > 0,
+        worker_should_open_entries=any(profile.can_open_new_positions for profile in profiles),
     )
 
 
