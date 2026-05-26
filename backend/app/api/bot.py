@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.schemas.schemas import BotControlResponse
-from app.services.bot_control import get_bot_control, set_bot_active
+from app.services.bot_control import get_bot_control, request_manual_close, set_bot_active
 
 router = APIRouter()
+
+
+class ManualCloseRequest(BaseModel):
+    symbol: str
 
 
 @router.get('/status', response_model=BotControlResponse)
@@ -24,3 +29,9 @@ async def start_bot(db: AsyncSession = Depends(get_db)):
 @router.post('/stop/', response_model=BotControlResponse)
 async def stop_bot(db: AsyncSession = Depends(get_db)):
     return await set_bot_active(db, False)
+
+
+@router.post('/close-position')
+@router.post('/close-position/')
+async def close_position(payload: ManualCloseRequest, db: AsyncSession = Depends(get_db)):
+    return await request_manual_close(db, payload.symbol)

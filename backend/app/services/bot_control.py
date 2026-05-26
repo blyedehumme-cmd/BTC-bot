@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from datetime import datetime
 
 from sqlalchemy import select
@@ -66,3 +67,32 @@ async def set_bot_active(db: AsyncSession, active: bool, updated_by: str = 'dash
 
     logger.info('bot_control_updated active=%s updated_by=%s mode=DRY_RUN', active, updated_by)
     return _response(control)
+
+
+async def request_manual_close(db: AsyncSession, symbol: str, updated_by: str = 'dashboard') -> dict[str, object]:
+    normalized_symbol = symbol.strip().upper()
+    now = datetime.utcnow()
+    snapshot = {
+        'action': 'close_position',
+        'symbol': normalized_symbol,
+        'requested_at': now.isoformat() + 'Z',
+        'source': updated_by,
+    }
+    log = AiDecision(
+        signal_id=0,
+        decision_type='manual_close_request',
+        reason=f'Manual close requested for {normalized_symbol}.',
+        condition_snapshot=json.dumps(snapshot),
+        explanation=f'Dashboard requested paper position close for {normalized_symbol} at live market price.',
+        timestamp=now,
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+    logger.info('manual_close_requested symbol=%s updated_by=%s', normalized_symbol, updated_by)
+    return {
+        'accepted': True,
+        'symbol': normalized_symbol,
+        'requested_at': now.isoformat() + 'Z',
+        'message': f'Manual close requested for {normalized_symbol}.',
+    }

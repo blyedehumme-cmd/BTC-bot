@@ -225,6 +225,8 @@ client: Optional[RESTClient] = None
 telegram_bot: Optional[Bot] = None
 ai_decision_cache: Dict[str, Dict[str, Any]] = {}
 last_positions_status_key = ""
+handled_manual_close_requests: set[str] = set()
+MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS = int(os.getenv("MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS", "1800"))
 
 
 # =========================
@@ -570,7 +572,7 @@ def _post_json_to_backend(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
-def _get_json_from_backend(path: str) -> Dict[str, Any]:
+def _get_json_from_backend(path: str) -> Any:
     if not BACKEND_API_URL:
         return {}
     try:
@@ -597,6 +599,65 @@ async def sync_bot_control_from_backend() -> None:
         state.active = active
         save_state()
         logger.info("bot_control_synced active=%s source=backend mode=%s", active, payload.get("mode"))
+
+
+def _parse_backend_timestamp(value: Any) -> float:
+    if not value:
+        return 0.0
+    try:
+        text = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(text).timestamp()
+    except Exception:
+        return 0.0
+
+
+async def fetch_manual_close_requests() -> List[Dict[str, Any]]:
+    if not BACKEND_API_URL or not DRY_RUN:
+        return []
+    payload = await asyncio.to_thread(lambda: _get_json_from_backend("logs"))
+    if not isinstance(payload, list):
+        return []
+    requests_to_close: List[Dict[str, Any]] = []
+    now_ts = time.time()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        snapshot_raw = item.get("condition_snapshot")
+        if not snapshot_raw:
+            continue
+        try:
+            snapshot = json.loads(snapshot_raw)
+        except Exception:
+            continue
+        if snapshot.get("action") != "close_position":
+            continue
+        symbol = str(snapshot.get("symbol", "")).upper().strip()
+        requested_at = snapshot.get("requested_at") or item.get("timestamp")
+        requested_ts = _parse_backend_timestamp(requested_at)
+        if not symbol or requested_ts <= 0:
+            continue
+        key = f"{symbol}:{requested_at}"
+        if key in handled_manual_close_requests:
+            continue
+        if now_ts - requested_ts > MANUAL_CLOSE_REQUEST_MAX_AGE_SECONDS:
+            handled_manual_close_requests.add(key)
+            continue
+        requests_to_close.append({"symbol": symbol, "requested_ts": requested_ts, "key": key})
+    return requests_to_close
+
+
+def manual_close_request_for_position(position: Dict[str, Any], requests_to_close: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    symbol = str(position.get("symbol", "")).upper()
+    opened_ts = float(position.get("last_trade_ts", 0.0) or 0.0)
+    for request in requests_to_close:
+        if request.get("symbol") != symbol:
+            continue
+        if float(request.get("requested_ts", 0.0)) < opened_ts - 5:
+            handled_manual_close_requests.add(str(request.get("key")))
+            continue
+        handled_manual_close_requests.add(str(request.get("key")))
+        return request
+    return None
 
 
 def generate_mock_candles(timeframe: str, limit: int) -> List[Dict[str, Any]]:
@@ -2177,6 +2238,7 @@ async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str, Any]]:
     analyses: List[Dict[str, Any]] = []
     kept_positions: List[Dict[str, Any]] = []
+    manual_close_requests = await fetch_manual_close_requests()
     for position in list(active_positions()):
         set_state_from_position(position)
         analysis = analyze_market(state.position_symbol)
@@ -2185,8 +2247,16 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
         timeframe_analysis_data = analysis.get(analysis_key_for_timeframe(entry_timeframe)) or analysis.get("entry_analysis") or analysis.get("hourly", {})
         price = float(timeframe_analysis_data.get("price", analysis.get("price", 0.0)))
         position["last_mark_price"] = price
-        exit_reason = manage_open_position(price, timeframe_analysis_data)
+        manual_close_request = manual_close_request_for_position(position, manual_close_requests)
+        exit_reason = "MANUAL_CLOSE" if manual_close_request else manage_open_position(price, timeframe_analysis_data)
         if exit_reason:
+            logger.info(
+                "position_closing symbol=%s side=%s reason=%s price=%.2f",
+                state.position_symbol,
+                state.side,
+                exit_reason,
+                price,
+            )
             order_side = "SELL" if state.side == "LONG" else "BUY"
             place_market_order(
                 order_side,

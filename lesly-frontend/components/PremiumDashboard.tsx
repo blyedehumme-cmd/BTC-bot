@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  closePosition,
   fetchBotControl,
   fetchAiLogs,
   fetchAiStatus,
@@ -689,6 +690,9 @@ export default function PremiumDashboard() {
   const [botControl, setBotControl] = useState<BotControl | null>(null);
   const [botActionBusy, setBotActionBusy] = useState(false);
   const [botActionMessage, setBotActionMessage] = useState('');
+  const [closeActionBusy, setCloseActionBusy] = useState(false);
+  const [closeActionMessage, setCloseActionMessage] = useState('');
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const liveNow = useLiveClock();
   const { data: live } = usePolling<LiveMarket>(useCallback(() => fetchLiveMarket(timeframe, selectedCrypto), [timeframe, selectedCrypto]), 3500);
   const { data: snapshots } = usePolling<MarketSnapshot[]>(useCallback(() => fetchMarketSnapshots(), []), 4500);
@@ -716,6 +720,19 @@ export default function PremiumDashboard() {
       setBotActionMessage('No se pudo actualizar el bot. Revisa backend.');
     } finally {
       setBotActionBusy(false);
+    }
+  }, []);
+
+  const runClosePosition = useCallback(async (symbol: string) => {
+    setCloseActionBusy(true);
+    setCloseActionMessage(`Solicitando cierre de ${symbol}...`);
+    try {
+      const response = await closePosition(symbol);
+      setCloseActionMessage(response.message || `Cierre manual solicitado para ${symbol}.`);
+    } catch {
+      setCloseActionMessage('No se pudo solicitar el cierre manual. Revisa backend.');
+    } finally {
+      setCloseActionBusy(false);
     }
   }, []);
 
@@ -928,7 +945,17 @@ export default function PremiumDashboard() {
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Operación live</p>
                       <p className="mt-2 text-3xl font-black">{openPosition.symbol} {openPosition.side}</p>
                     </div>
-                    <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-emerald-300">open</span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-emerald-300">open</span>
+                      <button
+                        type="button"
+                        disabled={closeActionBusy}
+                        onClick={() => runClosePosition(openPosition.symbol ?? selectedCrypto)}
+                        className="rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.16)] transition hover:border-cyan-200 hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Tomar TP
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                     <div><span className="text-slate-500">Temporalidad</span><p className="font-semibold text-white">{openPosition.entry_timeframe ?? '—'}</p></div>
@@ -940,6 +967,7 @@ export default function PremiumDashboard() {
                     <div><span className="text-slate-500">Stop loss</span><p className="font-semibold text-rose-300">{formatMoney(openPosition.stop_loss)}</p></div>
                     <div><span className="text-slate-500">Take profit</span><p className="font-semibold text-cyan-300">{formatMoney(openPosition.take_profit)}</p></div>
                   </div>
+                  {closeActionMessage && <p className="mt-3 text-xs text-cyan-200">{closeActionMessage}</p>}
                   <p className="mt-4 text-xs text-slate-500">Abierta NY {formatNewYorkDateTime(openPosition.opened_at)}</p>
                 </div>
               )}
@@ -1027,21 +1055,44 @@ export default function PremiumDashboard() {
 
           <section id="ia-chat" className="grid gap-4 xl:grid-cols-[0.82fr_1fr_0.82fr]">
             <div className="premium-card p-5">
-              <div className="panel-head"><h2>IA análisis</h2><span>{aiStatus?.engine_status ?? 'online'}</span></div>
-              <div className="space-y-4">
-                {[
-                  ['Señal', signal],
-                  ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral'],
-                  ['Temporalidad dominante', timeframe],
-                  ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
-                  ['Régimen HMM', `${hmmInfo.regime} · ${hmmInfo.status}`],
-                  ['Contexto HMM', hmmInfo.label],
-                  ['Validación IA', aiStatus?.mode ?? 'paper'],
-                  ['Último análisis', formatNewYorkDateTime(aiStatus?.last_analysis_time)],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className="mt-1 font-semibold text-white">{value}</p></div>
-                ))}
+              <div className="panel-head">
+                <h2>IA análisis</h2>
+                <button
+                  type="button"
+                  onClick={() => setAiPanelOpen((value) => !value)}
+                  className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-cyan-200 transition hover:border-cyan-200 hover:bg-cyan-300/20"
+                >
+                  {aiPanelOpen ? 'ocultar' : aiStatus?.engine_status ?? 'online'}
+                </button>
               </div>
+              {aiPanelOpen ? (
+                <div className="space-y-4">
+                  {[
+                    ['Señal', signal],
+                    ['Tendencia', live?.trend ?? snapshot?.trend ?? 'neutral'],
+                    ['Temporalidad dominante', timeframe],
+                    ['Momentum', (live?.change_1h_pct ?? 0) >= 0 ? 'positivo' : 'defensivo'],
+                    ['Régimen HMM', `${hmmInfo.regime} · ${hmmInfo.status}`],
+                    ['Contexto HMM', hmmInfo.label],
+                    ['Validación IA', aiStatus?.mode ?? 'paper'],
+                    ['Último análisis', formatNewYorkDateTime(aiStatus?.last_analysis_time)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-2xl border border-cyan-400/10 bg-black/25 p-3"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p><p className="mt-1 font-semibold text-white">{value}</p></div>
+                  ))}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAiPanelOpen(true)}
+                  className="mt-4 flex w-full items-center justify-between rounded-2xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5"
+                >
+                  <span>
+                    <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Resumen IA</span>
+                    <span className="mt-1 block font-semibold text-white">{signal} · {live?.trend ?? snapshot?.trend ?? 'neutral'} · {hmmInfo.label}</span>
+                  </span>
+                  <span className="text-xs uppercase tracking-[0.18em] text-cyan-200">ver</span>
+                </button>
+              )}
             </div>
             <BackendEventsPanel aiLogs={aiLogs} selectedCrypto={selectedCrypto} />
             <div className="premium-card p-5">

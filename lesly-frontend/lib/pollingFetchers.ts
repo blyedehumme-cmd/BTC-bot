@@ -121,6 +121,13 @@ export type BotControl = {
   note: string | null;
 };
 
+export type ManualCloseResponse = {
+  accepted: boolean;
+  symbol: string;
+  requested_at: string;
+  message: string;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -133,3 +140,4 @@ export const fetchLiveMarket = (timeframe = '1H', symbol = 'BTC') => (
 export const fetchBotControl = () => fetchJson<BotControl>('/bot/status');
 export const startBot = () => postJson<BotControl>('/bot/start');
 export const stopBot = () => postJson<BotControl>('/bot/stop');
+export const closePosition = (symbol: string) => postJson<ManualCloseResponse>('/bot/close-position', { symbol });
