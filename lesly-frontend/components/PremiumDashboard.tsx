@@ -314,6 +314,25 @@ function makeCandles(price: number, support?: number, resistance?: number, seed 
   });
 }
 
+function emaSeries(values: number[], period: number) {
+  if (!values.length || period <= 0) return [];
+  const k = 2 / (period + 1);
+  let current = values[0];
+  return values.map((value) => {
+    current = value * k + current * (1 - k);
+    return current;
+  });
+}
+
+function macdHistogram(values: number[]) {
+  if (values.length < 60) return null;
+  const fast = emaSeries(values, 21);
+  const slow = emaSeries(values, 50);
+  const macdLine = values.map((_, index) => fast[index] - slow[index]);
+  const signal = emaSeries(macdLine, 10);
+  return macdLine[macdLine.length - 1] - signal[signal.length - 1];
+}
+
 function MiniSparkline({ values, tone = 'cyan' }: { values: number[]; tone?: 'cyan' | 'green' | 'red' }) {
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
@@ -337,6 +356,9 @@ function CandleChart({
   exchange,
   label,
   assetName,
+  adx,
+  atr,
+  volumeRatio,
 }: {
   price: number;
   support?: number;
@@ -346,16 +368,34 @@ function CandleChart({
   exchange?: string;
   label?: string;
   assetName?: string;
+  adx?: number;
+  atr?: number;
+  volumeRatio?: number;
 }) {
   const candles = useMemo(() => {
     const clean = (liveCandles ?? []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value)));
     return clean.length > 5 ? clean.slice(-54) : makeCandles(price, support, resistance, timeframe.length);
   }, [liveCandles, price, support, resistance, timeframe]);
+  const closes = candles.map((candle) => candle.close);
   const highs = candles.map((candle) => candle.high);
   const lows = candles.map((candle) => candle.low);
   const max = Math.max(...highs, price * 1.01);
   const min = Math.min(...lows, price * 0.99);
   const range = Math.max(max - min, 1);
+  const widthStep = 100 / Math.max(candles.length - 1, 1);
+  const linePoints = (series: number[]) => series
+    .map((value, index) => `${index * widthStep},${((max - value) / range) * 100}`)
+    .join(' ');
+  const ema21 = emaSeries(closes, 21);
+  const ema50 = emaSeries(closes, 50);
+  const ema100 = emaSeries(closes, 100);
+  const macdHist = macdHistogram(closes);
+  const levelTop = (level?: number) => {
+    if (!level || level <= min || level >= max) return null;
+    return ((max - level) / range) * 100;
+  };
+  const supportTop = levelTop(support);
+  const resistanceTop = levelTop(resistance);
 
   return (
     <div className="premium-card relative h-[360px] overflow-hidden p-4 sm:p-5">
@@ -378,6 +418,13 @@ function CandleChart({
         </div>
       </div>
       <div className="relative z-10 h-[250px]">
+        <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {supportTop !== null && <line x1="0" x2="100" y1={supportTop} y2={supportTop} stroke="#22d3ee" strokeWidth="0.45" strokeDasharray="3 3" opacity="0.62" />}
+          {resistanceTop !== null && <line x1="0" x2="100" y1={resistanceTop} y2={resistanceTop} stroke="#fb7185" strokeWidth="0.45" strokeDasharray="3 3" opacity="0.62" />}
+          <polyline points={linePoints(ema21)} fill="none" stroke="#22c55e" strokeWidth="0.55" strokeLinecap="round" strokeLinejoin="round" opacity="0.92" />
+          <polyline points={linePoints(ema50)} fill="none" stroke="#38bdf8" strokeWidth="0.55" strokeLinecap="round" strokeLinejoin="round" opacity="0.88" />
+          <polyline points={linePoints(ema100)} fill="none" stroke="#f472b6" strokeWidth="0.55" strokeLinecap="round" strokeLinejoin="round" opacity="0.82" />
+        </svg>
         {candles.map((candle, index) => {
           const up = candle.close >= candle.open;
           const x = (index / Math.max(candles.length, 1)) * 100;
@@ -397,6 +444,19 @@ function CandleChart({
         })}
         <div className="absolute right-0 top-1/2 rounded-l-lg bg-emerald-500 px-3 py-1 text-xs font-semibold text-white shadow-[0_0_24px_rgba(16,185,129,0.45)]">
           {number.format(price)}
+        </div>
+        <div className="absolute bottom-2 left-2 z-30 flex flex-wrap gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+          <span className="rounded-full border border-emerald-400/30 bg-black/55 px-2 py-1 text-emerald-300">EMA 21</span>
+          <span className="rounded-full border border-sky-400/30 bg-black/55 px-2 py-1 text-sky-300">EMA 50</span>
+          <span className="rounded-full border border-pink-400/30 bg-black/55 px-2 py-1 text-pink-300">EMA 100</span>
+        </div>
+        <div className="absolute right-2 top-2 z-30 flex max-w-[70%] flex-wrap justify-end gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+          <span className="rounded-full border border-cyan-400/25 bg-black/55 px-2 py-1 text-cyan-200">ADX {adx ? number.format(adx) : '—'}</span>
+          <span className="rounded-full border border-cyan-400/25 bg-black/55 px-2 py-1 text-cyan-200">ATR {atr ? number.format(atr) : '—'}</span>
+          <span className="rounded-full border border-cyan-400/25 bg-black/55 px-2 py-1 text-cyan-200">Vol {volumeRatio ? `${volumeRatio.toFixed(2)}x` : '—'}</span>
+          <span className={`rounded-full border bg-black/55 px-2 py-1 ${macdHist === null ? 'border-slate-500/25 text-slate-300' : macdHist >= 0 ? 'border-emerald-400/25 text-emerald-300' : 'border-rose-400/25 text-rose-300'}`}>
+            MACD {macdHist === null ? '—' : macdHist >= 0 ? '+' : '-'}
+          </span>
         </div>
       </div>
     </div>
@@ -940,6 +1000,9 @@ export default function PremiumDashboard() {
                 exchange={live?.exchange}
                 label={live?.symbol ?? selectedMarket.display}
                 assetName={live?.asset_name ?? selectedMarket.name}
+                adx={live?.adx}
+                atr={live?.atr}
+                volumeRatio={live?.volume_ratio}
               />
             </div>
 
