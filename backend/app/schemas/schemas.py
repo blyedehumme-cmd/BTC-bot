@@ -223,3 +223,23 @@ class ExchangeAccountResponse(BaseModel):
     api_key_preview: str
     has_secret: bool
     has_passphrase: bool
+
+
+class UserBotSettingsUpdate(BaseModel):
+    active: Optional[bool] = None
+    selected_exchange: Optional[str] = None
+    symbols: Optional[str] = None
+    paper_balance: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    risk_profile: Optional[str] = None
+
+
+class UserBotSettingsResponse(BaseModel):
+    active: bool
+    mode: str
+    selected_exchange: str
+    symbols: str
+    paper_balance: float
+    max_open_positions: int
+    risk_profile: str
+    updated_at: datetime

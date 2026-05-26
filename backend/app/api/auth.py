@@ -7,13 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.models.models import User, UserExchangeAccount
+from app.models.models import User, UserBotSettings, UserExchangeAccount
 from app.schemas.schemas import (
     AuthTokenResponse,
     ExchangeAccountCreate,
     ExchangeAccountResponse,
     UserLoginRequest,
     UserRegisterRequest,
+    UserBotSettingsResponse,
+    UserBotSettingsUpdate,
     UserResponse,
 )
 from app.services.auth_service import (
@@ -52,6 +54,42 @@ def exchange_response(account: UserExchangeAccount) -> ExchangeAccountResponse:
         api_key_preview=api_key_preview,
         has_secret=bool(account.api_secret_encrypted),
         has_passphrase=bool(account.passphrase_encrypted),
+    )
+
+
+async def get_or_create_bot_settings(user: User, db: AsyncSession) -> UserBotSettings:
+    result = await db.execute(select(UserBotSettings).where(UserBotSettings.user_id == user.id))
+    settings = result.scalar_one_or_none()
+    if settings is None:
+        now = datetime.utcnow()
+        settings = UserBotSettings(
+            user_id=user.id,
+            active=False,
+            mode='DRY_RUN',
+            selected_exchange='kraken',
+            symbols='BTC,ETH',
+            paper_balance=5000.0,
+            max_open_positions=2,
+            risk_profile='balanced',
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(settings)
+        await db.commit()
+        await db.refresh(settings)
+    return settings
+
+
+def bot_settings_response(settings: UserBotSettings) -> UserBotSettingsResponse:
+    return UserBotSettingsResponse(
+        active=settings.active,
+        mode=settings.mode,
+        selected_exchange=settings.selected_exchange,
+        symbols=settings.symbols,
+        paper_balance=settings.paper_balance,
+        max_open_positions=settings.max_open_positions,
+        risk_profile=settings.risk_profile,
+        updated_at=settings.updated_at,
     )
 
 
@@ -157,3 +195,52 @@ async def upsert_exchange_account(
     await db.commit()
     await db.refresh(account)
     return exchange_response(account)
+
+
+@router.get('/bot-settings', response_model=UserBotSettingsResponse)
+async def get_user_bot_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await get_or_create_bot_settings(current_user, db)
+    return bot_settings_response(settings)
+
+
+@router.put('/bot-settings', response_model=UserBotSettingsResponse)
+async def update_user_bot_settings(
+    payload: UserBotSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await get_or_create_bot_settings(current_user, db)
+    if payload.selected_exchange is not None:
+        exchange = payload.selected_exchange.strip().lower()
+        if exchange not in SUPPORTED_USER_EXCHANGES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Exchange no soportado.')
+        settings.selected_exchange = exchange
+    if payload.symbols is not None:
+        allowed = {'BTC', 'ETH'}
+        symbols = [symbol.strip().upper() for symbol in payload.symbols.split(',') if symbol.strip()]
+        if not symbols or any(symbol not in allowed for symbol in symbols):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Solo BTC y ETH están habilitados.')
+        settings.symbols = ','.join(dict.fromkeys(symbols))
+    if payload.paper_balance is not None:
+        if payload.paper_balance <= 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Capital paper inválido.')
+        settings.paper_balance = float(payload.paper_balance)
+    if payload.max_open_positions is not None:
+        if payload.max_open_positions < 1 or payload.max_open_positions > 2:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Máximo permitido: 1 o 2 posiciones.')
+        settings.max_open_positions = int(payload.max_open_positions)
+    if payload.risk_profile is not None:
+        risk_profile = payload.risk_profile.strip().lower()
+        if risk_profile not in {'conservative', 'balanced', 'aggressive'}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Perfil de riesgo inválido.')
+        settings.risk_profile = risk_profile
+    if payload.active is not None:
+        settings.active = bool(payload.active)
+    settings.mode = 'DRY_RUN'
+    settings.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(settings)
+    return bot_settings_response(settings)

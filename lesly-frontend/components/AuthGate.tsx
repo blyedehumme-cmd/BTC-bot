@@ -4,11 +4,14 @@ import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react';
 import {
   fetchCurrentUser,
   fetchExchangeAccounts,
+  fetchUserBotSettings,
   loginUser,
   registerUser,
   saveExchangeAccount,
+  saveUserBotSettings,
   type ExchangeAccount,
   type LeslyUser,
+  type UserBotSettings,
 } from '../lib/pollingFetchers';
 
 type Props = {
@@ -19,15 +22,18 @@ export default function AuthGate({ children }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [user, setUser] = useState<LeslyUser | null>(null);
   const [accounts, setAccounts] = useState<ExchangeAccount[]>([]);
+  const [botSettings, setBotSettings] = useState<UserBotSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [showAccountForm, setShowAccountForm] = useState(false);
+  const [showBotForm, setShowBotForm] = useState(false);
 
   const refreshAccount = useCallback(async () => {
-    const [currentUser, exchangeAccounts] = await Promise.all([fetchCurrentUser(), fetchExchangeAccounts()]);
+    const [currentUser, exchangeAccounts, settings] = await Promise.all([fetchCurrentUser(), fetchExchangeAccounts(), fetchUserBotSettings()]);
     setUser(currentUser);
     setAccounts(exchangeAccounts);
+    setBotSettings(settings);
   }, []);
 
   useEffect(() => {
@@ -61,7 +67,9 @@ export default function AuthGate({ children }: Props) {
         : await loginUser(payload);
       window.localStorage.setItem('lesly_access_token', response.access_token);
       setUser(response.user);
-      setAccounts(await fetchExchangeAccounts());
+      const [exchangeAccounts, settings] = await Promise.all([fetchExchangeAccounts(), fetchUserBotSettings()]);
+      setAccounts(exchangeAccounts);
+      setBotSettings(settings);
       setMessage('Sesión iniciada. Lesly queda en modo paper por defecto.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo iniciar sesión.');
@@ -94,10 +102,35 @@ export default function AuthGate({ children }: Props) {
     }
   }
 
+  async function submitBotSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage('');
+    const form = new FormData(event.currentTarget);
+    try {
+      const settings = await saveUserBotSettings({
+        active: form.get('active') === 'on',
+        selected_exchange: String(form.get('selected_exchange') ?? 'kraken'),
+        symbols: Array.from(form.getAll('symbols')).join(',') || 'BTC,ETH',
+        paper_balance: Number(form.get('paper_balance') ?? 5000),
+        max_open_positions: Number(form.get('max_open_positions') ?? 2),
+        risk_profile: String(form.get('risk_profile') ?? 'balanced'),
+      });
+      setBotSettings(settings);
+      setShowBotForm(false);
+      setMessage('Perfil paper del usuario actualizado.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo guardar el perfil del bot.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function logout() {
     window.localStorage.removeItem('lesly_access_token');
     setUser(null);
     setAccounts([]);
+    setBotSettings(null);
   }
 
   if (loading) {
@@ -142,6 +175,9 @@ export default function AuthGate({ children }: Props) {
             <button className="rounded-full border border-cyan-400/25 px-4 py-2 text-xs uppercase tracking-[0.16em]" onClick={() => setShowAccountForm(!showAccountForm)}>
               Exchange
             </button>
+            <button className="rounded-full border border-cyan-400/25 px-4 py-2 text-xs uppercase tracking-[0.16em]" onClick={() => setShowBotForm(!showBotForm)}>
+              Bot
+            </button>
             <button className="rounded-full border border-rose-400/25 px-4 py-2 text-xs uppercase tracking-[0.16em] text-rose-200" onClick={logout}>
               Salir
             </button>
@@ -161,6 +197,42 @@ export default function AuthGate({ children }: Props) {
             <button className="rounded-2xl bg-emerald-400 px-3 py-3 font-black uppercase tracking-[0.14em] text-slate-950" disabled={busy}>Guardar</button>
             <p className="md:col-span-5 text-xs text-slate-400">
               Cuentas guardadas: {accounts.length ? accounts.map((account) => `${account.exchange} ${account.api_key_preview}`).join(' · ') : 'ninguna todavía'}.
+            </p>
+          </form>
+        )}
+        {showBotForm && (
+          <form className="mx-auto mt-4 grid max-w-[1500px] gap-3 rounded-3xl border border-cyan-400/20 bg-black/30 p-4 md:grid-cols-6" onSubmit={submitBotSettings}>
+            <select className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="selected_exchange" defaultValue={botSettings?.selected_exchange ?? 'kraken'}>
+              <option value="kraken">Kraken</option>
+              <option value="coinbase">Coinbase</option>
+              <option value="binance">Binance</option>
+              <option value="okx">OKX</option>
+            </select>
+            <input className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="paper_balance" type="number" min="1" defaultValue={botSettings?.paper_balance ?? 5000} placeholder="Capital paper" />
+            <select className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="max_open_positions" defaultValue={botSettings?.max_open_positions ?? 2}>
+              <option value="1">1 posición</option>
+              <option value="2">2 posiciones</option>
+            </select>
+            <select className="rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3" name="risk_profile" defaultValue={botSettings?.risk_profile ?? 'balanced'}>
+              <option value="conservative">Conservador</option>
+              <option value="balanced">Balanceado</option>
+              <option value="aggressive">Agresivo</option>
+            </select>
+            <label className="flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3">
+              <input type="checkbox" name="symbols" value="BTC" defaultChecked={(botSettings?.symbols ?? 'BTC,ETH').includes('BTC')} />
+              BTC
+            </label>
+            <label className="flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-slate-950 px-3 py-3">
+              <input type="checkbox" name="symbols" value="ETH" defaultChecked={(botSettings?.symbols ?? 'BTC,ETH').includes('ETH')} />
+              ETH
+            </label>
+            <label className="flex items-center gap-2 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-3 md:col-span-2">
+              <input type="checkbox" name="active" defaultChecked={botSettings?.active ?? false} />
+              Bot paper activo para esta cuenta
+            </label>
+            <button className="rounded-2xl bg-cyan-400 px-3 py-3 font-black uppercase tracking-[0.14em] text-slate-950 md:col-span-2" disabled={busy}>Guardar perfil</button>
+            <p className="md:col-span-6 text-xs text-slate-400">
+              Este perfil separa configuración por usuario. La ejecución multiusuario del worker se conectará en la próxima fase.
             </p>
           </form>
         )}

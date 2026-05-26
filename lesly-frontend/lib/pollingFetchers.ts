@@ -161,6 +161,17 @@ export type ExchangeAccount = {
   has_passphrase: boolean;
 };
 
+export type UserBotSettings = {
+  active: boolean;
+  mode: string;
+  selected_exchange: string;
+  symbols: string;
+  paper_balance: number;
+  max_open_positions: number;
+  risk_profile: string;
+  updated_at: string;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -183,6 +194,7 @@ export const registerUser = (payload: { email: string; name: string; password: s
 export const loginUser = (payload: { email: string; password: string }) => postJson<AuthToken>('/auth/login', payload);
 export const fetchCurrentUser = () => fetchJson<LeslyUser>('/auth/me');
 export const fetchExchangeAccounts = () => fetchJson<ExchangeAccount[]>('/auth/exchange-accounts');
+export const fetchUserBotSettings = () => fetchJson<UserBotSettings>('/auth/bot-settings');
 export const saveExchangeAccount = (payload: {
   exchange: string;
   api_key: string;
@@ -191,3 +203,6 @@ export const saveExchangeAccount = (payload: {
   account_label?: string;
   dry_run?: boolean;
 }) => postJson<ExchangeAccount>('/auth/exchange-accounts', payload);
+export const saveUserBotSettings = (payload: Partial<UserBotSettings>) => (
+  postJson<UserBotSettings>('/auth/bot-settings', payload)
+);

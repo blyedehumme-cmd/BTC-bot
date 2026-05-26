@@ -66,6 +66,31 @@ async def test_register_login_and_exchange_account(client):
     assert binance_account.status_code == 200
     assert binance_account.json()['exchange'] == 'binance'
 
+    settings = await client.get('/api/auth/bot-settings', headers={'Authorization': f'Bearer {token}'})
+    assert settings.status_code == 200
+    assert settings.json()['paper_balance'] == 5000.0
+    assert settings.json()['symbols'] == 'BTC,ETH'
+
+    updated_settings = await client.put(
+        '/api/auth/bot-settings',
+        headers={'Authorization': f'Bearer {token}'},
+        json={
+            'active': True,
+            'selected_exchange': 'okx',
+            'symbols': 'BTC',
+            'paper_balance': 7500,
+            'max_open_positions': 1,
+            'risk_profile': 'conservative',
+        },
+    )
+    assert updated_settings.status_code == 200
+    updated_payload = updated_settings.json()
+    assert updated_payload['active'] is True
+    assert updated_payload['selected_exchange'] == 'okx'
+    assert updated_payload['symbols'] == 'BTC'
+    assert updated_payload['paper_balance'] == 7500
+    assert updated_payload['max_open_positions'] == 1
+
     login = await client.post('/api/auth/login', json={
         'email': email,
         'password': 'super-secret-123',

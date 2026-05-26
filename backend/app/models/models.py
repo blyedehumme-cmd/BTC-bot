@@ -125,6 +125,7 @@ class User(Base):
     updated_at = Column(DateTime, nullable=False)
 
     exchange_accounts = relationship('UserExchangeAccount', back_populates='user', cascade='all, delete-orphan')
+    bot_settings = relationship('UserBotSettings', back_populates='user', cascade='all, delete-orphan', uselist=False)
 
 
 class UserExchangeAccount(Base):
@@ -145,3 +146,21 @@ class UserExchangeAccount(Base):
     updated_at = Column(DateTime, nullable=False)
 
     user = relationship('User', back_populates='exchange_accounts')
+
+
+class UserBotSettings(Base):
+    __tablename__ = 'user_bot_settings'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    active = Column(Boolean, nullable=False, default=False)
+    mode = Column(String(length=32), nullable=False, default='DRY_RUN')
+    selected_exchange = Column(String(length=32), nullable=False, default='kraken')
+    symbols = Column(String(length=120), nullable=False, default='BTC,ETH')
+    paper_balance = Column(Float, nullable=False, default=5000.0)
+    max_open_positions = Column(Integer, nullable=False, default=2)
+    risk_profile = Column(String(length=64), nullable=False, default='balanced')
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    user = relationship('User', back_populates='bot_settings')
