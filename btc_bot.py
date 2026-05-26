@@ -2341,7 +2341,6 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
         else:
             synced_position = sync_position_from_state(position)
             kept_positions.append(synced_position)
-            await send_open_position_to_backend(synced_position)
     state.positions = kept_positions
     sync_primary_position()
     save_state()
@@ -2523,6 +2522,7 @@ async def trading_loop(app: Optional[Application]) -> None:
                 key=lambda item: float(item.get("confidence", 0.0)),
                 reverse=True,
             )
+            opened_position_this_cycle = False
             for candidate in actionable:
                 if len(active_positions()) >= MAX_OPEN_POSITIONS:
                     break
@@ -2531,7 +2531,9 @@ async def trading_loop(app: Optional[Application]) -> None:
                     break
                 account = paper_account_summary() if DRY_RUN else {"available_balance": get_usdc_balance()}
                 available_balance = float(account.get("available_balance", balance))
-                await open_position_from_analysis(candidate, available_balance, app)
+                opened_position_this_cycle = await open_position_from_analysis(candidate, available_balance, app) or opened_position_this_cycle
+            if opened_position_this_cycle:
+                await publish_positions_status_to_backend(force=True, reason="Paper positions status after open")
         except Exception as exc:
             logger.exception("trading_loop_error error=%s", exc)
             await send_telegram(app, f"Error en bot:\n{str(exc)[:900]}")
