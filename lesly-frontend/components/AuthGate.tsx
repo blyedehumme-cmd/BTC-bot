@@ -47,9 +47,14 @@ export default function AuthGate({ children }: Props) {
     setMessage('');
     const form = new FormData(event.currentTarget);
     try {
+      const password = String(form.get('password') ?? '');
+      if (mode === 'register' && password !== String(form.get('password_confirm') ?? '')) {
+        setMessage('Las contraseñas no coinciden.');
+        return;
+      }
       const payload = {
         email: String(form.get('email') ?? ''),
-        password: String(form.get('password') ?? ''),
+        password,
       };
       const response = mode === 'register'
         ? await registerUser({ ...payload, name: String(form.get('name') ?? '') })
@@ -105,13 +110,16 @@ export default function AuthGate({ children }: Props) {
         <section className="mx-auto max-w-md rounded-[2rem] border border-cyan-400/25 bg-slate-950/80 p-6 shadow-[0_0_60px_rgba(0,140,255,0.22)]">
           <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Lesly AI Trading</p>
           <h1 className="mt-3 text-3xl font-black">{mode === 'login' ? 'Entrar' : 'Crear usuario'}</h1>
-          <p className="mt-2 text-sm text-slate-400">Cada cuenta tendrá sus propias credenciales de exchange cifradas. Por seguridad, todo inicia en paper trading.</p>
+          <p className="mt-2 text-sm text-slate-400">Cada cuenta tendrá sus propias credenciales de exchange cifradas.</p>
           <form className="mt-6 space-y-4" onSubmit={submitAuth}>
             {mode === 'register' && (
               <input className="w-full rounded-2xl border border-cyan-400/20 bg-black/40 px-4 py-3 text-white outline-none focus:border-cyan-300" name="name" placeholder="Nombre" required />
             )}
             <input className="w-full rounded-2xl border border-cyan-400/20 bg-black/40 px-4 py-3 text-white outline-none focus:border-cyan-300" name="email" type="email" placeholder="Email" required />
             <input className="w-full rounded-2xl border border-cyan-400/20 bg-black/40 px-4 py-3 text-white outline-none focus:border-cyan-300" name="password" type="password" placeholder="Contraseña" required minLength={8} />
+            {mode === 'register' && (
+              <input className="w-full rounded-2xl border border-cyan-400/20 bg-black/40 px-4 py-3 text-white outline-none focus:border-cyan-300" name="password_confirm" type="password" placeholder="Confirmar contraseña" required minLength={8} />
+            )}
             <button className="w-full rounded-2xl bg-cyan-400 px-4 py-3 font-black uppercase tracking-[0.18em] text-slate-950 disabled:opacity-60" disabled={busy}>
               {busy ? 'Procesando...' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
             </button>
