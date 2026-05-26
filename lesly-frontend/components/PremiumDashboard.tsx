@@ -39,6 +39,7 @@ const cryptoMarkets = [
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const paperStartingBalance = Number(process.env.NEXT_PUBLIC_PAPER_STARTING_BALANCE ?? 5000);
+const POSITION_STATUS_MAX_AGE_MS = 15 * 60 * 1000;
 
 type Candle = {
   time?: string;
@@ -151,6 +152,12 @@ function snapshotMatchesCrypto(snapshot: DecisionSnapshot, crypto: string) {
   );
 }
 
+function isFreshLog(log: AiLog, maxAgeMs = POSITION_STATUS_MAX_AGE_MS) {
+  if (!log.timestamp) return false;
+  const timestamp = new Date(log.timestamp).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= maxAgeMs;
+}
+
 function parseDecisionSnapshot(logs?: AiLog[] | null, crypto?: string): DecisionSnapshot | null {
   for (const log of logs ?? []) {
     if (!log.condition_snapshot) continue;
@@ -166,6 +173,8 @@ function parseDecisionSnapshot(logs?: AiLog[] | null, crypto?: string): Decision
 
 function parseOpenPositionSnapshot(logs?: AiLog[] | null, crypto?: string): DecisionSnapshot | null {
   for (const log of logs ?? []) {
+    if (!log.message?.toLowerCase().includes('paper positions status')) continue;
+    if (!isFreshLog(log)) continue;
     if (!log.condition_snapshot) continue;
     try {
       const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
@@ -179,20 +188,13 @@ function parseOpenPositionSnapshot(logs?: AiLog[] | null, crypto?: string): Deci
       continue;
     }
   }
-  for (const log of logs ?? []) {
-    if (!log.condition_snapshot) continue;
-    try {
-      const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;
-      if (snapshot.open_position?.status === 'OPEN' && (!crypto || matchesCrypto(snapshot.open_position.symbol, crypto))) return snapshot;
-    } catch {
-      continue;
-    }
-  }
   return null;
 }
 
 function parsePaperAccountSnapshot(logs?: AiLog[] | null): DecisionSnapshot | null {
   for (const log of logs ?? []) {
+    if (!log.message?.toLowerCase().includes('paper positions status')) continue;
+    if (!isFreshLog(log)) continue;
     if (!log.condition_snapshot) continue;
     try {
       const snapshot = JSON.parse(log.condition_snapshot) as DecisionSnapshot;

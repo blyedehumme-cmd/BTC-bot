@@ -1895,25 +1895,29 @@ def open_positions_snapshot() -> Dict[str, Any]:
     }
 
 
-async def send_positions_status_to_backend() -> None:
+async def publish_positions_status_to_backend(force: bool = False, reason: str = "Paper positions status") -> None:
     global last_positions_status_key
     if not BACKEND_API_URL:
         return
     snapshot = open_positions_snapshot()
     status_key = json.dumps(snapshot, sort_keys=True, default=str)
-    if status_key == last_positions_status_key:
+    if not force and status_key == last_positions_status_key:
         return
     last_positions_status_key = status_key
     positions = snapshot.get("open_positions", [])
     payload = {
         "signal_id": 0,
         "decision_type": "position_status",
-        "reason": f"Paper positions status: {len(positions)} open.",
+        "reason": f"{reason}: {len(positions)} open.",
         "condition_snapshot": json.dumps(snapshot),
         "explanation": "Estado actual de posiciones paper publicado por el worker.",
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
     await post_json_to_backend("ai/decisions", payload)
+
+
+async def send_positions_status_to_backend() -> None:
+    await publish_positions_status_to_backend()
 
 
 async def publish_analyses_to_backend(analyses: List[Dict[str, Any]]) -> None:
@@ -2211,6 +2215,8 @@ async def manage_existing_positions(app: Optional[Application]) -> List[Dict[str
     state.positions = kept_positions
     sync_primary_position()
     save_state()
+    if not kept_positions:
+        await publish_positions_status_to_backend(force=True, reason="Paper positions closed")
     return analyses
 
 
