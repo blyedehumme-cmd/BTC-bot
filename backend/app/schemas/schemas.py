@@ -170,3 +170,56 @@ class BotControlResponse(BaseModel):
     updated_at: str
     updated_by: str
     note: Optional[str] = None
+
+
+class UserRegisterRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    name: str
+    paper_trading: bool
+    is_active: bool
+    created_at: datetime
+
+    model_config = {
+        'from_attributes': True,
+    }
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = 'bearer'
+    user: UserResponse
+
+
+class ExchangeAccountCreate(BaseModel):
+    exchange: str
+    api_key: str
+    api_secret: str
+    passphrase: Optional[str] = None
+    account_label: str = 'main'
+    dry_run: bool = True
+
+
+class ExchangeAccountResponse(BaseModel):
+    id: int
+    exchange: str
+    account_label: str
+    permissions: str
+    dry_run: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    api_key_preview: str
+    has_secret: bool
+    has_passphrase: bool

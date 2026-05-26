@@ -1,5 +1,10 @@
 import PremiumDashboard from '../components/PremiumDashboard';
+import AuthGate from '../components/AuthGate';
 
 export default function Home() {
-  return <PremiumDashboard />;
+  return (
+    <AuthGate>
+      <PremiumDashboard />
+    </AuthGate>
+  );
 }

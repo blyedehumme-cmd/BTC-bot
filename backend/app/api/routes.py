@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from .ai import router as ai_router
+from .auth import router as auth_router
 from .bot import router as bot_router
 from .db import router as db_router
 from .health import router as health_router
@@ -10,6 +11,7 @@ from .trades import router as trades_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, prefix='/health', tags=['health'])
+api_router.include_router(auth_router, prefix='/auth', tags=['auth'])
 api_router.include_router(bot_router, prefix='/bot', tags=['bot'])
 api_router.include_router(signals_router, prefix='/signals', tags=['signals'])
 api_router.include_router(logs_router, prefix='/logs', tags=['logs'])

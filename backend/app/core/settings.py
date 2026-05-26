@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     database_ssl: bool = False
     paper_trading: bool = True
     secret_key: str = 'change-me'
+    encryption_key: str = ''
+    access_token_expire_minutes: int = 1440
     api_prefix: str = '/api'
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000'
     frontend_url: str = ''

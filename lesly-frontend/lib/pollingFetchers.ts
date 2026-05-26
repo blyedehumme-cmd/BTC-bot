@@ -132,6 +132,35 @@ export type StopLossUpdateResponse = ManualCloseResponse & {
   stop_loss?: number;
 };
 
+export type LeslyUser = {
+  id: number;
+  email: string;
+  name: string;
+  paper_trading: boolean;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type AuthToken = {
+  access_token: string;
+  token_type: string;
+  user: LeslyUser;
+};
+
+export type ExchangeAccount = {
+  id: number;
+  exchange: string;
+  account_label: string;
+  permissions: string;
+  dry_run: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  api_key_preview: string;
+  has_secret: boolean;
+  has_passphrase: boolean;
+};
+
 export const fetchSignals = () => fetchJson<Signal[]>('/signals');
 export const fetchMarketSnapshots = () => fetchJson<MarketSnapshot[]>('/market/snapshots');
 export const fetchTrades = () => fetchJson<Trade[]>('/trades');
@@ -148,3 +177,17 @@ export const closePosition = (symbol: string) => postJson<ManualCloseResponse>('
 export const updateStopLoss = (symbol: string, stopLoss: number) => (
   postJson<StopLossUpdateResponse>('/bot/update-stop-loss', { symbol, stop_loss: stopLoss })
 );
+export const registerUser = (payload: { email: string; name: string; password: string }) => (
+  postJson<AuthToken>('/auth/register', payload)
+);
+export const loginUser = (payload: { email: string; password: string }) => postJson<AuthToken>('/auth/login', payload);
+export const fetchCurrentUser = () => fetchJson<LeslyUser>('/auth/me');
+export const fetchExchangeAccounts = () => fetchJson<ExchangeAccount[]>('/auth/exchange-accounts');
+export const saveExchangeAccount = (payload: {
+  exchange: string;
+  api_key: string;
+  api_secret: string;
+  passphrase?: string;
+  account_label?: string;
+  dry_run?: boolean;
+}) => postJson<ExchangeAccount>('/auth/exchange-accounts', payload);

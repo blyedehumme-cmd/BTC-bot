@@ -1,5 +1,5 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
@@ -110,3 +110,38 @@ class BotControl(Base):
     updated_at = Column(DateTime, nullable=False)
     updated_by = Column(String(length=64), nullable=False, default='dashboard')
     note = Column(Text, nullable=True)
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(length=255), nullable=False, unique=True, index=True)
+    name = Column(String(length=120), nullable=False)
+    password_hash = Column(String(length=255), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    paper_trading = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    exchange_accounts = relationship('UserExchangeAccount', back_populates='user', cascade='all, delete-orphan')
+
+
+class UserExchangeAccount(Base):
+    __tablename__ = 'user_exchange_accounts'
+    __table_args__ = (UniqueConstraint('user_id', 'exchange', 'account_label', name='uq_user_exchange_label'),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    exchange = Column(String(length=32), nullable=False)
+    account_label = Column(String(length=80), nullable=False, default='main')
+    api_key_encrypted = Column(Text, nullable=False)
+    api_secret_encrypted = Column(Text, nullable=False)
+    passphrase_encrypted = Column(Text, nullable=True)
+    permissions = Column(String(length=120), nullable=False, default='trade_only')
+    dry_run = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+    user = relationship('User', back_populates='exchange_accounts')
