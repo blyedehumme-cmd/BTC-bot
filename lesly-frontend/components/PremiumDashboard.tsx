@@ -879,6 +879,9 @@ export default function PremiumDashboard() {
   const accountMarginReserved = openPositionIsStale ? 0 : paperAccountSnapshot?.margin_reserved ?? marginReserved;
   const accountOpenNotional = openPositionIsStale ? 0 : paperAccountSnapshot?.open_notional ?? openPositionNotional;
   const accountAvailableBalance = openPositionIsStale ? accountClosedBalance : paperAccountSnapshot?.available_balance ?? Math.max(closedPaperEquity - marginReserved, 0);
+  const openPositionsCount = openPositionIsStale
+    ? allOpenPositions.filter((position) => !matchesCrypto(position.symbol, selectedCrypto)).length
+    : allOpenPositions.length;
   const totalPaperPnlPct = ((accountPaperEquity / accountStartingBalance) - 1) * 100;
   const realizedPaperPnlPct = ((accountClosedBalance / accountStartingBalance) - 1) * 100;
   const riskAtStop = openPosition?.entry_price && openPosition?.stop_loss && openPosition?.position_size
@@ -944,8 +947,12 @@ export default function PremiumDashboard() {
               <button
                 type="button"
                 onClick={() => setSummaryPanelOpen((value) => !value)}
-                className="mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5 sm:grid-cols-4"
+                className="relative mt-4 grid w-full gap-3 rounded-3xl border border-cyan-400/10 bg-black/25 p-4 pr-28 text-left transition hover:border-cyan-300/30 hover:bg-cyan-300/5 sm:grid-cols-4"
               >
+                <span className="absolute right-4 top-1/2 flex h-20 w-20 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 shadow-[0_0_28px_rgba(34,211,238,0.14)]">
+                  <span className="text-[9px] uppercase tracking-[0.16em] text-cyan-200">Abiertas</span>
+                  <span className="mt-1 text-3xl font-black leading-none text-white">{openPositionsCount}</span>
+                </span>
                 <span>
                   <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">Disponible</span>
                   <span className="mt-1 block text-xl font-semibold text-white">{formatMoney(accountAvailableBalance)}</span>
